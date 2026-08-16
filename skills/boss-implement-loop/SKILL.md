@@ -31,9 +31,12 @@ takes precedence when present; report which policy is selected.
 Rank each task `low`, `medium`, or `high` with a one-sentence rationale, and
 choose the lowest capable tier. Among equivalent providers, prefer the larger
 remaining weekly usage percentage when comparable data is available; otherwise
-use the stable order and report the unavailable capacity data. Keep at most one
-writer per worktree, two reviewers, and three child agents total. Use isolated
-Paseo worktrees for writers and read-only review mode for reviewers.
+use the stable order and report the unavailable capacity data. Use the provider
+usage helpers in [`USAGE-HELPERS.md`](USAGE-HELPERS.md) to obtain normalized
+weekly capacity; compare only when equivalent providers both report
+`status: ok`. Keep at most one writer per worktree, two reviewers, and three
+child agents total. Use isolated Paseo worktrees for writers and read-only
+review mode for reviewers.
 
 ## Issue Loop
 
