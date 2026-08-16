@@ -35,7 +35,7 @@ Implementation tiers:
 
 Review tiers:
 
-- **Tier 1** — `opencode/opencode-go/mimo-v2.5`
+- **Tier 1** — `opencode/opencode-go/mimo-v2.5`; `opencode/opencode/nemotron-3-ultra-free`
 - **Tier 2** — `opencode/opencode-go/qwen3.7-plus`; `codex/gpt-5.6-luna`(low thinking)
 
 ## Capacity tie-breaking
