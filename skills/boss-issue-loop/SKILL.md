@@ -39,8 +39,10 @@ child agents total.
 
 ## Orchestration
 
-Read [`ORCHESTRATION.md`](ORCHESTRATION.md), then load the selected adapter
-before inspecting or launching agents. A repository override at
+Read [`ORCHESTRATION.md`](ORCHESTRATION.md), then load its selected adapter:
+[`Paseo`](orchestration/paseo.md) or [`Herdr`](orchestration/herdr.md). Load a
+custom adapter from the path named by a repository override. Do this before
+inspecting or launching agents. A repository override at
 `.agents/boss-issue-loop/ORCHESTRATION.md` takes precedence; report the selected
 policy and adapter.
 
