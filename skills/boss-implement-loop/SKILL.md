@@ -41,7 +41,7 @@ Paseo worktrees for writers and read-only review mode for reviewers.
 2. Select the first unblocked issue in scope and tracker order. Confirm no active agent or workspace already owns its issue label. Record the accepted base commit.
 3. Create `issue-<number>-<slug>` from the accepted base commit. Pass the exact issue number, base commit, and Paseo workspace ID to the implementer.
 4. Render and send the Implementer Handoff Contract below. Fill every placeholder with the exact issue, accepted base, workspace, and repository-specific commands discovered in step 1. Keep the commit before the final ticket verification gate.
-5. Accept only a committed, linear, clean worktree whose verification gate passes. A clearly correctable stall gets one targeted recovery instruction; repeated failure, non-progress, scope corruption, or an explicit blocker follows the escalation policy in MODEL-SELECTION.md (archive the agent and worktree, retry from the accepted base at the next capability tier).
+5. Accept only a committed, linear, clean worktree whose verification gate passes. A clearly correctable stall gets one targeted recovery instruction; repeated failure, non-progress, scope corruption, or an explicit blocker follows the escalation policy in MODEL-SELECTION.md (archive the agent and its disposable worktree, retry from the accepted base at the next capability tier).
 6. Launch exactly two read-only reviewers in parallel, one from each review tier. Give both the fixed-point diff and issue specification, and deliver the Reviewer Contract below. Ask for concrete findings with file/line references and separate hard defects from advisory concerns.
 7. Verify every claimed failure yourself. Resolve actionable findings in the issue worktree, commit the fixes, and rerun the repository and ticket verification gates. Repeat review when a fix materially changes behavior.
 8. Integrate only the verified commit into the coordinator branch with a non-interactive fast-forward or merge. Inspect status, diff, and log before integration.
@@ -59,13 +59,14 @@ Paseo worktrees for writers and read-only review mode for reviewers.
 
 For every review, deliver this contract with concrete values:
 
-> Review issue #N at commit `<commit>` against base `<base>`. Read the complete
-> issue and inspect only the fixed-point diff. Do not modify files. Report hard
-> defects first with file/line evidence, then advisory concerns. For each finding,
-> name the violated acceptance criterion or demonstrated failure. Report the
-> verification commands you ran and finish with `approve`, `changes requested`,
-> or `blocked`. `blocked` identifies an exact missing dependency, command failure,
-> or unavailable item of evidence. Advisory concerns alone yield `approve`.
+> Review issue #N at commit `<commit>` against base `<base>` in workspace
+> `<workspace>`. Read the complete issue and inspect only the fixed-point diff.
+> Do not modify files. Run the verification command `<verification-command>` and
+> report its result. Report hard defects first with file/line evidence, then
+> advisory concerns. For each finding, name the violated acceptance criterion or
+> demonstrated failure. Finish with `approve`, `changes requested`, or `blocked`.
+> `blocked` identifies an exact missing dependency, command failure, or
+> unavailable item of evidence. Advisory concerns alone yield `approve`.
 
 The implementer supplies the review packet evidence. Bounded review fixes may
 resume the same implementer once; failed recovery follows the normal
