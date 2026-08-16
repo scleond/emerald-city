@@ -1,8 +1,8 @@
 # Model Selection
 
-Portable provider-selection policy for the Boss implement loop. A repository
+Portable provider-selection policy for the Boss issue loop. A repository
 may override this file by placing its own copy at
-`.agents/boss-implement-loop/MODEL-SELECTION.md`; when present, prefer it and
+`.agents/boss-issue-loop/MODEL-SELECTION.md`; when present, prefer it and
 report that the repository policy is in use. If a selected policy lacks proper
 tiers, warn and fall back to this packaged default.
 

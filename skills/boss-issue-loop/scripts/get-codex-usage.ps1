@@ -136,7 +136,7 @@ function Invoke-RateLimitsRead {
         $writer = $proc.StandardInput
         $writer.NewLine = "`n"
         $writer.WriteLine((@{ method = 'initialize'; id = 1; params = @{
-            clientInfo = @{ name = 'boss-implement-loop'; title = 'Boss Implement Loop'; version = '1.0' }
+            clientInfo = @{ name = 'boss-issue-loop'; title = 'Boss Issue Loop'; version = '1.0' }
         } } | ConvertTo-Json -Compress -Depth 6))
         $writer.WriteLine((@{ method = 'initialized' } | ConvertTo-Json -Compress))
         $writer.WriteLine((@{ method = $Method; id = $requestId } | ConvertTo-Json -Compress))

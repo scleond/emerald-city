@@ -63,7 +63,7 @@ coproc CODEX_CP { "$CODEX" app-server --stdio 2>/dev/null; }
 
 request_id=2
 {
-  printf '%s\n' '{"method":"initialize","id":1,"params":{"clientInfo":{"name":"boss-implement-loop","title":"Boss Implement Loop","version":"1.0"}}}'
+  printf '%s\n' '{"method":"initialize","id":1,"params":{"clientInfo":{"name":"boss-issue-loop","title":"Boss Issue Loop","version":"1.0"}}}'
   printf '%s\n' '{"method":"initialized"}'
   printf '%s\n' "{\"method\":\"$METHOD\",\"id\":$request_id}"
 } >&"${CODEX_CP[1]}"

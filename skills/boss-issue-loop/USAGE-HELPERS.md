@@ -2,7 +2,7 @@
 
 `get-codex-usage.ps1` and `get-opencode-go-usage.ps1` are provider-usage
 helpers for the Boss issue loop's capacity tie-breaking
-(`skills/boss-implement-loop/MODEL-SELECTION.md`). Each hides provider-specific
+(`skills/boss-issue-loop/MODEL-SELECTION.md`). Each hides provider-specific
 authentication and usage lookup behind one normalized JSON result.
 
 Native bash equivalents are provided for Linux hosts without PowerShell:
@@ -106,7 +106,7 @@ validate the emitted JSON shape plus percentage bounds.
 Run from the repo root:
 
 ```powershell
-Invoke-Pester .\skills\boss-implement-loop\scripts\tests
+Invoke-Pester .\skills\boss-issue-loop\scripts\tests
 ```
 
 The scripts are designed so the fetch step (`Invoke-RateLimitsRead` /
