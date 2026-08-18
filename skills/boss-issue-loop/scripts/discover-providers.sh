@@ -28,6 +28,36 @@ TIMEOUT="${DISCOVERY_TIMEOUT_SECONDS:-10}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Run a command with a timeout. Returns 124 on timeout.
+# Uses GNU `timeout` if available, otherwise backgrounds the process.
+run_with_timeout() {
+  local secs="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=KILL "$secs" "$@" 2>/dev/null
+  else
+    local tmpfile
+    tmpfile="$(mktemp)"
+    local pid
+    "$@" >"$tmpfile" 2>/dev/null &
+    pid=$!
+    local elapsed=0
+    while kill -0 "$pid" 2>/dev/null; do
+      if [[ "$elapsed" -ge "$secs" ]]; then
+        kill -9 "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+        rm -f "$tmpfile"
+        return 124
+      fi
+      sleep 1
+      elapsed=$((elapsed + 1))
+    done
+    wait "$pid" 2>/dev/null
+    cat "$tmpfile"
+    rm -f "$tmpfile"
+    return 0
+  fi
+}
+
 # Emit a normalized provider entry.
 emit_provider() {
   local name="$1" status="$2" authenticated="$3" models="$4" warning="${5:-}"
@@ -81,7 +111,7 @@ probe_codex() {
 
   # Try to list models via `codex models --json`
   local models_output
-  if models_output=$("$cmd" models --json 2>/dev/null); then
+  if models_output=$(run_with_timeout "$timeout" "$cmd" models --json 2>/dev/null); then
     if [[ -n "$models_output" ]] && jq -e '.' <<<"$models_output" >/dev/null 2>&1; then
       models_json="$(jq -c '[.[] | { id: .id, name: (.name // .id) }]' <<<"$models_output" 2>/dev/null || echo "[]")"
     fi
@@ -89,11 +119,11 @@ probe_codex() {
 
   # Probe authentication: try a simple command that requires auth
   local auth_output
-  if auth_output=$("$cmd" auth status --json 2>/dev/null); then
+  if auth_output=$(run_with_timeout "$timeout" "$cmd" auth status --json 2>/dev/null); then
     if [[ -n "$auth_output" ]]; then
       authenticated="true"
     fi
-  elif "$cmd" auth status >/dev/null 2>&1; then
+  elif run_with_timeout "$timeout" "$cmd" auth status >/dev/null 2>&1; then
     authenticated="true"
   fi
 
@@ -115,7 +145,7 @@ probe_opencode() {
 
   # Try to list models via `opencode models --json`
   local models_output
-  if models_output=$("$cmd" models --json 2>/dev/null); then
+  if models_output=$(run_with_timeout "$timeout" "$cmd" models --json 2>/dev/null); then
     if [[ -n "$models_output" ]] && jq -e '.' <<<"$models_output" >/dev/null 2>&1; then
       models_json="$(jq -c '[.[] | { id: .id, name: (.name // .id) }]' <<<"$models_output" 2>/dev/null || echo "[]")"
     fi
@@ -123,11 +153,11 @@ probe_opencode() {
 
   # Probe authentication
   local auth_output
-  if auth_output=$("$cmd" auth status --json 2>/dev/null); then
+  if auth_output=$(run_with_timeout "$timeout" "$cmd" auth status --json 2>/dev/null); then
     if [[ -n "$auth_output" ]]; then
       authenticated="true"
     fi
-  elif "$cmd" auth status >/dev/null 2>&1; then
+  elif run_with_timeout "$timeout" "$cmd" auth status >/dev/null 2>&1; then
     authenticated="true"
   fi
 

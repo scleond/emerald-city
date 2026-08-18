@@ -92,55 +92,17 @@ function Get-CodexProvider {
             -Warning "Codex executable '$Executable' not found on PATH."
     }
 
-    # Probe authentication via app-server --stdio initialize handshake
     try {
-        $psi = [System.Diagnostics.ProcessStartInfo]::new()
-        $psi.FileName = (Get-Command -Name $Executable).Source
-        $psi.Arguments = 'app-server --stdio'
-        $psi.UseShellExecute = $false
-        $psi.RedirectStandardInput = $true
-        $psi.RedirectStandardOutput = $true
-        $psi.RedirectStandardError = $true
-        $proc = [System.Diagnostics.Process]::new()
-        $proc.StartInfo = $psi
-        if (-not $proc.Start()) {
-            return New-ProviderEntry -Name 'codex' -Status 'error' `
-                -Warning "Failed to start codex app-server for authentication probe."
-        }
-
-        $outLines = [System.Collections.Concurrent.ConcurrentQueue[string]]::new()
-        $reader = [powershell]::Create()
-        [void]$reader.AddScript({
-            param($target, $queue)
-            while ($true) {
-                $line = $target.StandardOutput.ReadLine()
-                if ($null -eq $line) { break }
-                $queue.Enqueue($line)
-            }
-        }).AddArgument($proc).AddArgument($outLines)
-        $readerHandle = $reader.BeginInvoke()
-
-        $writer = $proc.StandardInput
-        $writer.NewLine = "`n"
-        $writer.WriteLine((@{ method = 'initialize'; id = 1; params = @{
-            clientInfo = @{ name = 'boss-discovery'; title = 'Boss Discovery'; version = '1.0' }
-        } } | ConvertTo-Json -Compress -Depth 6))
-        $writer.Flush()
-
-        $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+        # Probe authentication via `codex auth status --json`
+        $authOutput = & $Executable auth status --json 2>$null
         $authenticated = $false
-        while ([DateTime]::UtcNow -lt $deadline) {
-            if ($outLines.TryDequeue([ref]$line)) {
-                $msg = $null
-                try { $msg = $line | ConvertFrom-Json -ErrorAction Stop } catch { $msg = $null }
-                if ($null -ne $msg -and $msg.PSObject.Properties['id'] -and $msg.id -eq 1) {
-                    # If we got a response, the session is active (authenticated)
-                    $authenticated = $true
-                    break
-                }
-            } else {
-                if ($proc.HasExited) { Start-Sleep -Milliseconds 120 }
-                else { Start-Sleep -Milliseconds 40 }
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($authOutput)) {
+            try {
+                $authData = $authOutput | ConvertFrom-Json -ErrorAction Stop
+                $authenticated = $true
+            } catch {
+                # Non-JSON auth status; check exit code only
+                $authenticated = ($LASTEXITCODE -eq 0)
             }
         }
 
@@ -163,12 +125,6 @@ function Get-CodexProvider {
     } catch {
         return New-ProviderEntry -Name 'codex' -Status 'error' `
             -Warning "Failed to probe codex: $($_.Exception.Message)"
-    } finally {
-        try { if ($proc) { $proc.StandardInput.Close() } } catch { }
-        try { if ($proc -and -not $proc.HasExited) { $proc.Kill($true) } } catch { }
-        try { if ($readerHandle -and -not $readerHandle.IsCompleted) { $reader.Stop() } } catch { }
-        try { if ($reader) { $reader.Dispose() } } catch { }
-        try { if ($proc) { $proc.Dispose() } } catch { }
     }
 }
 
