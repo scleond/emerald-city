@@ -97,6 +97,72 @@ header.
 - The OpenCode Go script's local-history and scraping prohibitions are hard
   constraints, not fallback candidates.
 
+## `discover-providers.ps1` / `discover-providers.sh`
+
+Provider discovery script for the Boss issue loop's setup sub-skill. Emits a
+normalized JSON inventory of locally available providers, models, and
+orchestration adapters. Used to seed user-level config (`MODEL-SELECTION.md`
+and `ORCHESTRATION.md`) via the setup sub-skill (`setup.md`).
+
+### Normalized interface
+
+Both scripts write a single JSON object to stdout with this shape:
+
+```json
+{
+  "status": "ok | unavailable | error",
+  "providers": [
+    {
+      "name": "codex | opencode",
+      "status": "ok | unavailable | error",
+      "authenticated": true,
+      "models": [{ "id": "model-id", "name": "Model Name" }],
+      "warning": "message or null"
+    }
+  ],
+  "adapters": [
+    {
+      "name": "paseo | herdr",
+      "source": "packaged | user",
+      "path": "/path/to/adapter.md"
+    }
+  ],
+  "warning": "message or null"
+}
+```
+
+### Status semantics
+
+- `ok` — at least one provider was found and probed successfully.
+- `unavailable` — no providers were found on PATH.
+- `error` — all providers produced errors during probing.
+
+Each provider entry has its own `status` following the same semantics. A
+provider with `status: ok` and `authenticated: false` is present but not
+logged in.
+
+### Behavior
+
+- Probes each provider CLI for presence on PATH, authentication status, and
+  available models.
+- Discovers orchestration adapters from the packaged `orchestration/` directory
+  and user-level overrides.
+- Never reads, prints, copies, or persists credentials.
+- Never guesses fallback values — unavailable providers are reported as such.
+- A helper failure never aborts the caller.
+
+### Parameters (PowerShell)
+
+- `-CodexExecutable` (default `codex`)
+- `-OpenCodeExecutable` (default `opencode`)
+- `-TimeoutSeconds` (default `10`)
+
+### Environment variables (Bash)
+
+- `CODEX_EXECUTABLE` (default `codex`)
+- `OPENCODE_EXECUTABLE` (default `opencode`)
+- `DISCOVERY_TIMEOUT_SECONDS` (default `10`)
+
 ## Tests
 
 Deterministic tests live in `scripts/tests/`.
@@ -129,3 +195,24 @@ bash skills/boss-issue-loop/scripts/tests/run-bash-tests.sh
 
 Both require `jq`, `curl`, and GNU `date` on the host. The runners skip
 gracefully with a message when a dependency is missing.
+
+### Discovery script tests
+
+The discovery script (`discover-providers.ps1` / `discover-providers.sh`) has
+its own deterministic tests covering success, unavailable, malformed-response,
+and command-failure paths.
+
+**PowerShell (Pester):**
+
+```powershell
+Invoke-Pester .\skills\boss-issue-loop\scripts\tests\discover-providers.Tests.ps1
+```
+
+**Bash (bats-core):**
+
+```bash
+bats skills/boss-issue-loop/scripts/tests/discover-providers.bats
+```
+
+These tests mock the provider CLIs and verify the normalized JSON output shape,
+status semantics, and credential-leak assertions.
