@@ -56,3 +56,24 @@ unique names matching Herdr's `[a-z][a-z0-9_-]{0,31}` rule. Use explicit
 workspace, pane, and agent targets; never rely on UI focus. Treat command
 failure, permission denial, unavailable provider kinds, or uncertain review
 isolation as an unsupported operation and return control to the core loop.
+
+## Resolving a provider descriptor
+
+Each tier entry is a structured provider descriptor with fields `provider`,
+`model`, and `effort`. Map it to Herdr agent-launch arguments:
+
+| Descriptor field | Herdr target |
+|------------------|--------------|
+| `provider` / `model` | Mapped to a supported `--kind` value (e.g. `codex / gpt-5.6-luna` → `--kind codex`) |
+| `effort: "low"` | No thinking arguments; minimal resource allocation |
+| `effort: "medium"` | `--thinking medium` or equivalent installed flag |
+| `effort: "high"` | `--thinking high` or equivalent installed flag |
+
+Inspect the installed `herdr agent start --help` output to confirm available
+`--kind` and `--thinking` values before launching. Treat the installed CLI as
+authoritative.
+
+When a descriptor cannot be resolved — no installed `--kind` matches the
+provider, the model is unknown to the kind, or the effort level has no
+corresponding thinking argument — return `unsupported` before launching any
+agent. Do not guess a substitute.

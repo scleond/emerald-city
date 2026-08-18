@@ -130,12 +130,40 @@ total.
 
 ## Orchestration
 
-Read [`ORCHESTRATION.md`](ORCHESTRATION.md), then load its selected adapter:
-[`Paseo`](orchestration/paseo.md) or [`Herdr`](orchestration/herdr.md). Load a
-custom adapter from the path named by a repository override. Do this before
-inspecting or launching agents. A repository override at
-`.agents/boss-issue-loop/ORCHESTRATION.md` takes precedence; report the selected
-policy and adapter.
+Resolve the adapter **per run** through a three-level merge, most-specific wins.
+Do this before inspecting or launching agents.
+
+### Adapter selection
+
+| Level | Source | Contains |
+|-------|--------|----------|
+| **Packaged** | `skills/boss-issue-loop/orchestration/` | Built-in adapters: `paseo`, `herdr`. Default: `paseo`. |
+| **User/machine** | `~/.config/opencode/boss-issue-loop/ORCHESTRATION.md` (Linux); `~/Library/Application Support/opencode/boss-issue-loop/ORCHESTRATION.md` (macOS); `%APPDATA%\opencode\boss-issue-loop\ORCHESTRATION.md` (Windows) | `adapter: <name>` directive selecting a packaged adapter. |
+| **Repository** | `.agents/boss-issue-loop/ORCHESTRATION.md` | `adapter: <name>` or `adapter: <path>` for a custom adapter document. |
+
+Resolution: start with the packaged default (`paseo`). If the user/machine
+level defines `adapter:`, use it. If the repository level defines `adapter:`,
+use it. A repository-level custom adapter path is resolved from the repository
+root.
+
+### Fallback rules
+
+- If the override is missing, unreadable, names multiple adapters, or leaves
+  an interface operation undefined, warn and use the packaged Paseo adapter.
+- If the packaged adapter is also unavailable, stop before launching agents.
+
+### Adapter guarantees
+
+Load exactly one adapter for an issue attempt and report its name. Keep that
+adapter through implementation, review, integration, and cleanup. Select a new
+adapter only before a fresh attempt begins.
+
+### Loading the adapter
+
+After resolution, load the adapter document:
+- `paseo` → [`orchestration/paseo.md`](orchestration/paseo.md)
+- `herdr` → [`orchestration/herdr.md`](orchestration/herdr.md)
+- custom path → load from the resolved path
 
 Use the adapter only through this interface:
 
