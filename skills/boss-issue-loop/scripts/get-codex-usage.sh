@@ -50,82 +50,100 @@ fail_without_jq() {
   exit 0
 }
 
-command -v jq >/dev/null 2>&1 || fail_without_jq
+fetch_codex_rpc() {
+  coproc CODEX_CP { "$CODEX" app-server --stdio 2>/dev/null; }
 
-if ! command -v "$CODEX" >/dev/null 2>&1; then
-  emit codex error null "" "" "Codex executable '$CODEX' not found on PATH."
-  exit 0
-fi
+  local request_id=2
+  {
+    printf '%s\n' '{"method":"initialize","id":1,"params":{"clientInfo":{"name":"boss-issue-loop","title":"Boss Issue Loop","version":"1.0"}}}'
+    printf '%s\n' '{"method":"initialized"}'
+    printf '%s\n' "{\"method\":\"$METHOD\",\"id\":$request_id}"
+  } >&"${CODEX_CP[1]}"
 
-# --- Drive the app-server JSON-RPC over stdio -------------------------------
-
-coproc CODEX_CP { "$CODEX" app-server --stdio 2>/dev/null; }
-
-request_id=2
-{
-  printf '%s\n' '{"method":"initialize","id":1,"params":{"clientInfo":{"name":"boss-issue-loop","title":"Boss Issue Loop","version":"1.0"}}}'
-  printf '%s\n' '{"method":"initialized"}'
-  printf '%s\n' "{\"method\":\"$METHOD\",\"id\":$request_id}"
-} >&"${CODEX_CP[1]}"
-
-result=""
-while IFS= read -r -t "$TIMEOUT" -u "${CODEX_CP[0]}" line; do
-  id="$(jq -r '.id // empty' <<<"$line" 2>/dev/null || true)"
-  if [[ -n "$id" && "$id" == "$request_id" ]]; then
-    err="$(jq -r '.error.message // empty' <<<"$line" 2>/dev/null || true)"
-    if [[ -n "$err" ]]; then
-      result="RPC_ERROR:$err"
-    else
-      result="$(jq -c '.result // empty' <<<"$line" 2>/dev/null || true)"
+  local result=""
+  while IFS= read -r -t "$TIMEOUT" -u "${CODEX_CP[0]}" line; do
+    local id
+    id="$(jq -r '.id // empty' <<<"$line" 2>/dev/null || true)"
+    if [[ -n "$id" && "$id" == "$request_id" ]]; then
+      local err
+      err="$(jq -r '.error.message // empty' <<<"$line" 2>/dev/null || true)"
+      if [[ -n "$err" ]]; then
+        result="RPC_ERROR:$err"
+      else
+        result="$(jq -c '.result // empty' <<<"$line" 2>/dev/null || true)"
+      fi
+      break
     fi
-    break
+  done
+
+  kill "$CODEX_CP_PID" 2>/dev/null || true
+  wait "$CODEX_CP_PID" 2>/dev/null || true
+
+  echo "$result"
+}
+
+normalize_codex_response() {
+  local result="$1"
+
+  if [[ -z "$result" ]]; then
+    emit codex error null "" "$SOURCE" "Failed to read codex rate limits: no response within ${TIMEOUT}s."
+    return
   fi
-done
+  if [[ "$result" == RPC_ERROR:* ]]; then
+    emit codex error null "" "$SOURCE" "Codex '$METHOD' RPC error: ${result#RPC_ERROR:}"
+    return
+  fi
+  if [[ "$result" == "null" ]]; then
+    emit codex error null "" "$SOURCE" "Codex '$METHOD' returned an empty result."
+    return
+  fi
 
-kill "$CODEX_CP_PID" 2>/dev/null || true
-wait "$CODEX_CP_PID" 2>/dev/null || true
+  local window
+  window="$(jq -c --argjson wmin "$WEEKLY_MINUTES" '
+    def windows:
+      ([.rateLimits.primary, .rateLimits.secondary]
+        + [ ((.rateLimitsByLimitId // {}) | to_entries[] | .value.primary, .value.secondary) ])
+      | map(select(type == "object"));
+    windows | map(select(has("usedPercent") and .windowDurationMins == $wmin))[0] // null
+  ' <<<"$result")"
 
-if [[ -z "$result" ]]; then
-  emit codex error null "" "$SOURCE" "Failed to read codex rate limits: no response within ${TIMEOUT}s."
-  exit 0
+  if [[ -z "$window" || "$window" == "null" ]]; then
+    emit codex unavailable null "" "$SOURCE" "No weekly rate-limit window was available in the codex response."
+    return
+  fi
+
+  local used
+  used="$(jq -r '.usedPercent // empty' <<<"$window")"
+  if [[ -z "$used" ]] || ! [[ "$used" =~ ^-?[0-9]+$ ]]; then
+    emit codex error null "" "$SOURCE" "Weekly rate-limit window was present but the used-percent value was unusable."
+    return
+  fi
+
+  local remaining
+  remaining="$(awk -v u="$used" 'BEGIN { r = 100 - u; if (r < 0) r = 0; if (r > 100) r = 100; printf "%d", r }')"
+
+  local resets_at="" resets_sec
+  resets_sec="$(jq -r '.resetsAt // empty' <<<"$window")"
+  if [[ -n "$resets_sec" ]] && [[ "$resets_sec" =~ ^[0-9]+$ ]]; then
+    resets_at="$(date -u -d "@$resets_sec" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  fi
+
+  emit codex ok "$remaining" "$resets_at" "$SOURCE" ""
+}
+
+main() {
+  command -v jq >/dev/null 2>&1 || fail_without_jq
+
+  if ! command -v "$CODEX" >/dev/null 2>&1; then
+    emit codex error null "" "" "Codex executable '$CODEX' not found on PATH."
+    return
+  fi
+
+  local result
+  result="$(fetch_codex_rpc)"
+  normalize_codex_response "$result"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main
 fi
-if [[ "$result" == RPC_ERROR:* ]]; then
-  emit codex error null "" "$SOURCE" "Codex '$METHOD' RPC error: ${result#RPC_ERROR:}"
-  exit 0
-fi
-if [[ "$result" == "null" ]]; then
-  emit codex error null "" "$SOURCE" "Codex '$METHOD' returned an empty result."
-  exit 0
-fi
-
-# --- Select the weekly window and normalize ---------------------------------
-
-window="$(jq -c --argjson wmin "$WEEKLY_MINUTES" '
-  def windows:
-    ([.rateLimits.primary, .rateLimits.secondary]
-      + [ ((.rateLimitsByLimitId // {}) | to_entries[] | .value.primary, .value.secondary) ])
-    | map(select(type == "object"));
-  windows | map(select(has("usedPercent") and .windowDurationMins == $wmin))[0] // null
-' <<<"$result")"
-
-if [[ -z "$window" || "$window" == "null" ]]; then
-  emit codex unavailable null "" "$SOURCE" "No weekly rate-limit window was available in the codex response."
-  exit 0
-fi
-
-used="$(jq -r '.usedPercent // empty' <<<"$window")"
-if [[ -z "$used" ]] || ! [[ "$used" =~ ^-?[0-9]+$ ]]; then
-  emit codex error null "" "$SOURCE" "Weekly rate-limit window was present but the used-percent value was unusable."
-  exit 0
-fi
-
-remaining="$(awk -v u="$used" 'BEGIN { r = 100 - u; if (r < 0) r = 0; if (r > 100) r = 100; printf "%d", r }')"
-
-resets_at=""
-resets_sec="$(jq -r '.resetsAt // empty' <<<"$window")"
-if [[ -n "$resets_sec" ]] && [[ "$resets_sec" =~ ^[0-9]+$ ]]; then
-  resets_at="$(date -u -d "@$resets_sec" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
-fi
-
-emit codex ok "$remaining" "$resets_at" "$SOURCE" ""
-exit 0

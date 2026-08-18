@@ -99,16 +99,33 @@ header.
 
 ## Tests
 
-Deterministic Pester tests live in `scripts/tests/`. They cover representative
-success, unavailable, malformed-response, and command-failure fixtures, and
-validate the emitted JSON shape plus percentage bounds.
+Deterministic tests live in `scripts/tests/`.
 
-Run from the repo root:
+### PowerShell (Pester)
 
 ```powershell
 Invoke-Pester .\skills\boss-issue-loop\scripts\tests
 ```
 
-The scripts are designed so the fetch step (`Invoke-RateLimitsRead` /
-`Invoke-GoUsage`) can be mocked; each script's main body only runs when it is
-executed as a script, not when dot-sourced by the test harness.
+### Bash
+
+The bash variants are tested with bats-core and a standalone runner. Both
+cover the same four fixture classes (success, unavailable, malformed-response,
+command-failure), cross-variant parity assertions, and credential-leak checks.
+Tests run without network access — the fetch step is mocked via functions
+overridden after sourcing the script.
+
+**With bats-core** (preferred):
+
+```bash
+bats skills/boss-issue-loop/scripts/tests/bash-usage-helpers.bats
+```
+
+**Without bats-core** (standalone runner):
+
+```bash
+bash skills/boss-issue-loop/scripts/tests/run-bash-tests.sh
+```
+
+Both require `jq`, `curl`, and GNU `date` on the host. The runners skip
+gracefully with a message when a dependency is missing.

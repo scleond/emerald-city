@@ -56,74 +56,89 @@ fail_no_curl() {
   exit 0
 }
 
-command -v jq >/dev/null 2>&1 || fail_no_jq
-command -v curl >/dev/null 2>&1 || fail_no_curl
-
-# --- Resolve the API key ----------------------------------------------------
-
-key="${OPENCODE_GO_API_KEY:-}"
-if [[ -z "$key" ]]; then
-  auth_path="${OPENCODE_GO_AUTH_STORE_PATH:-}"
-  if [[ -z "$auth_path" ]]; then
-    if [[ -n "${HOME:-}" && -f "$HOME/.local/share/opencode/auth.json" ]]; then
-      auth_path="$HOME/.local/share/opencode/auth.json"
-    elif [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/auth.json" ]]; then
-      auth_path="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/auth.json"
-    else
-      auth_path="$HOME/.config/opencode/auth.json"
+resolve_api_key() {
+  local key="${OPENCODE_GO_API_KEY:-}"
+  if [[ -z "$key" ]]; then
+    local auth_path="${OPENCODE_GO_AUTH_STORE_PATH:-}"
+    if [[ -z "$auth_path" ]]; then
+      if [[ -n "${HOME:-}" && -f "$HOME/.local/share/opencode/auth.json" ]]; then
+        auth_path="$HOME/.local/share/opencode/auth.json"
+      elif [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/auth.json" ]]; then
+        auth_path="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/auth.json"
+      else
+        auth_path="$HOME/.config/opencode/auth.json"
+      fi
+    fi
+    if [[ -f "$auth_path" ]]; then
+      key="$(jq -r '."opencode-go".key // empty' "$auth_path" 2>/dev/null || true)"
     fi
   fi
-  if [[ -f "$auth_path" ]]; then
-    key="$(jq -r '."opencode-go".key // empty' "$auth_path" 2>/dev/null || true)"
+  echo "$key"
+}
+
+fetch_opencode_go_usage() {
+  local key="$1"
+  local body_file="$2"
+
+  local http_code
+  http_code="$(curl -sS -m "$TIMEOUT" \
+    -H "Authorization: Bearer $key" \
+    -o "$body_file" -w '%{http_code}' "$ENDPOINT" 2>/dev/null || true)"
+
+  if [[ -z "$http_code" ]]; then
+    emit opencode-go error null "" "$SOURCE" "Failed to read OpenCode Go usage: curl error."
+    return
   fi
-fi
-
-if [[ -z "$key" ]]; then
-  emit opencode-go unavailable null "" "" "No OpenCode Go API key found; run 'opencode auth login' or set OPENCODE_GO_API_KEY."
-  exit 0
-fi
-
-# --- Fetch usage ------------------------------------------------------------
-
-body="$(mktemp)"
-trap 'rm -f "$body"' EXIT
-
-http_code="$(curl -sS -m "$TIMEOUT" \
-  -H "Authorization: Bearer $key" \
-  -o "$body" -w '%{http_code}' "$ENDPOINT" 2>/dev/null || true)"
-
-if [[ -z "$http_code" ]]; then
-  emit opencode-go error null "" "$SOURCE" "Failed to read OpenCode Go usage: curl error."
-  exit 0
-fi
-if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
-  emit opencode-go unavailable null "" "$SOURCE" "OpenCode Go returned HTTP $http_code; the API key is invalid or has no Go subscription."
-  exit 0
-fi
-if [[ "$http_code" != "200" ]]; then
-  emit opencode-go error null "" "$SOURCE" "OpenCode Go usage endpoint returned unexpected HTTP $http_code."
-  exit 0
-fi
-
-# --- Normalize the weekly window -------------------------------------------
-
-percent="$(jq -r '.usage.weekly.percent // .usage.weekly.usagePercent // .weeklyUsage.percent // .weeklyUsage.usagePercent // empty' "$body" 2>/dev/null || true)"
-resets_raw="$(jq -r '.usage.weekly.resetsAt // .weeklyUsage.resetsAt // empty' "$body" 2>/dev/null || true)"
-
-if [[ -z "$percent" ]] || ! [[ "$percent" =~ ^-?[0-9]+$ ]]; then
-  emit opencode-go unavailable null "" "$SOURCE" "No weekly usage window was available from the OpenCode Go endpoint."
-  exit 0
-fi
-
-remaining="$(awk -v u="$percent" 'BEGIN { r = 100 - u; if (r < 0) r = 0; if (r > 100) r = 100; printf "%d", r }')"
-
-resets_at=""
-if [[ -n "$resets_raw" ]]; then
-  # resetsAt is an ISO-8601 string; pass it through if it parses as a date.
-  if date -d "$resets_raw" >/dev/null 2>&1; then
-    resets_at="$(date -u -d "$resets_raw" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+  if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
+    emit opencode-go unavailable null "" "$SOURCE" "OpenCode Go returned HTTP $http_code; the API key is invalid or has no Go subscription."
+    return
   fi
-fi
+  if [[ "$http_code" != "200" ]]; then
+    emit opencode-go error null "" "$SOURCE" "OpenCode Go usage endpoint returned unexpected HTTP $http_code."
+    return
+  fi
 
-emit opencode-go ok "$remaining" "$resets_at" "$SOURCE" ""
-exit 0
+  local percent resets_raw
+  percent="$(jq -r '.usage.weekly.percent // .usage.weekly.usagePercent // .weeklyUsage.percent // .weeklyUsage.usagePercent // empty' "$body_file" 2>/dev/null || true)"
+  resets_raw="$(jq -r '.usage.weekly.resetsAt // .weeklyUsage.resetsAt // empty' "$body_file" 2>/dev/null || true)"
+
+  if [[ -z "$percent" ]] || ! [[ "$percent" =~ ^-?[0-9]+$ ]]; then
+    emit opencode-go unavailable null "" "$SOURCE" "No weekly usage window was available from the OpenCode Go endpoint."
+    return
+  fi
+
+  local remaining
+  remaining="$(awk -v u="$percent" 'BEGIN { r = 100 - u; if (r < 0) r = 0; if (r > 100) r = 100; printf "%d", r }')"
+
+  local resets_at=""
+  if [[ -n "$resets_raw" ]]; then
+    if date -d "$resets_raw" >/dev/null 2>&1; then
+      resets_at="$(date -u -d "$resets_raw" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
+    fi
+  fi
+
+  emit opencode-go ok "$remaining" "$resets_at" "$SOURCE" ""
+}
+
+main() {
+  command -v jq >/dev/null 2>&1 || fail_no_jq
+  command -v curl >/dev/null 2>&1 || fail_no_curl
+
+  local key
+  key="$(resolve_api_key)"
+
+  if [[ -z "$key" ]]; then
+    emit opencode-go unavailable null "" "" "No OpenCode Go API key found; run 'opencode auth login' or set OPENCODE_GO_API_KEY."
+    return
+  fi
+
+  local body_file
+  body_file="$(mktemp)"
+  trap 'rm -f "$body_file"' RETURN
+
+  fetch_opencode_go_usage "$key" "$body_file"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main
+fi
