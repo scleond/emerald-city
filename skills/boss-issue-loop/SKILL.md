@@ -15,8 +15,9 @@ complete native sub-issue descendant tree. Nested spec issues are organizational
 nodes, not implementation tickets. Select unblocked descendants dependency-first,
 then in tracker order. Ignore unrelated repository issues. Finish successfully
 only when every implementation descendant is closed; otherwise report the blocked
-descendants explicitly. Leave the parent spec open and report it ready for
-acceptance.
+descendants explicitly. Do not close the spec issue — acceptance is human
+judgment. Report the spec ready for acceptance per the lifecycle policy in
+`CONTRIBUTING.md`.
 
 When no spec is selected, preserve the existing repository-wide behavior below,
 processing all open implementation issues in tracker order.
