@@ -229,8 +229,8 @@ test_parity_identical_window() {
   local c; c="$(run_codex '{"rateLimits":{"primary":{"usedPercent":28,"resetsAt":1768435200,"windowDurationMins":10080}}}')"
   local o; o="$(run_opencode_go 200 '{"usage":{"weekly":{"status":"ok","percent":28,"resetsAt":"2026-01-15T00:00:00Z"}}}')"
   assert_eq "parity: status"    "ok" "$(jq_field '.status' "$c")"
-  assert_eq "parity: remaining" "70" "$(jq_field '.weeklyRemainingPercent' "$c")"
-  assert_eq "parity: remaining (ocgo)" "70" "$(jq_field '.weeklyRemainingPercent' "$o")"
+  assert_eq "parity: remaining" "72" "$(jq_field '.weeklyRemainingPercent' "$c")"
+  assert_eq "parity: remaining (ocgo)" "72" "$(jq_field '.weeklyRemainingPercent' "$o")"
   assert_eq "parity: status (ocgo)"    "ok" "$(jq_field '.status' "$o")"
 }
 

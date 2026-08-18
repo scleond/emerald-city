@@ -103,6 +103,11 @@ normalize_codex_response() {
     return
   fi
 
+  if ! jq -e '.' <<<"$result" >/dev/null 2>&1; then
+    emit codex error null "" "$SOURCE" "Codex '$METHOD' returned malformed JSON."
+    return
+  fi
+
   local window
   window="$(jq -c --argjson wmin "$WEEKLY_MINUTES" '
     def windows:

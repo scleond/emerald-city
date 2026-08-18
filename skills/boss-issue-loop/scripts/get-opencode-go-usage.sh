@@ -113,9 +113,22 @@ normalize_opencode_go_response() {
     return
   fi
 
+  if ! jq -e '.' <<<"$result" >/dev/null 2>&1; then
+    emit opencode-go error null "" "$SOURCE" "OpenCode Go usage endpoint returned malformed JSON."
+    return
+  fi
+
+  local has_weekly
+  has_weekly="$(jq -r 'has("usage") and (.usage | has("weekly")) or has("weeklyUsage")' <<<"$result" 2>/dev/null || echo "false")"
+
   local percent resets_raw
   percent="$(jq -r '.usage.weekly.percent // .usage.weekly.usagePercent // .weeklyUsage.percent // .weeklyUsage.usagePercent // empty' <<<"$result" 2>/dev/null || true)"
   resets_raw="$(jq -r '.usage.weekly.resetsAt // .weeklyUsage.resetsAt // empty' <<<"$result" 2>/dev/null || true)"
+
+  if [[ "$has_weekly" != "true" ]]; then
+    emit opencode-go unavailable null "" "$SOURCE" "No weekly usage window was available in the OpenCode Go response."
+    return
+  fi
 
   if [[ -z "$percent" ]] || ! [[ "$percent" =~ ^-?[0-9]+$ ]]; then
     emit opencode-go error null "" "$SOURCE" "OpenCode Go weekly window was present but the usage-percent value was unusable."
