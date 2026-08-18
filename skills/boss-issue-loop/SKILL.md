@@ -23,10 +23,102 @@ processing all open implementation issues in tracker order.
 
 ## Provider selection
 
-Consult [`MODEL-SELECTION.md`](MODEL-SELECTION.md) for the difficulty rubric,
-capability tiers, equivalent providers, capacity tie-breaking, and escalation
-policy. A repository override at `.agents/boss-issue-loop/MODEL-SELECTION.md`
-takes precedence when present; report which policy is selected.
+Policy is resolved **per section** through a three-level merge, most-specific
+wins. Each section of `MODEL-SELECTION.md` is resolved independently — a
+repository that wants to floor everything at tier 3 must not restate the user's
+whole roster to do it.
+
+### Resolution levels
+
+| Level | Source | Contains | Committed? |
+|-------|--------|----------|------------|
+| **Packaged** | `skills/boss-issue-loop/MODEL-SELECTION.md` | Portable policy only: difficulty rubric, escalation policy, tie-break rules. | Yes (never edited, blanked, or git-ignored) |
+| **User/machine** | `~/.config/opencode/boss-issue-loop/MODEL-SELECTION.md` (Linux); `~/Library/Application Support/opencode/boss-issue-loop/MODEL-SELECTION.md` (macOS); `%APPDATA%\opencode\boss-issue-loop\MODEL-SELECTION.md` (Windows) | Local inventory: model roster, tier assignments, adapter selection. | No — never committed to a repository |
+| **Repository** | `.agents/boss-issue-loop/MODEL-SELECTION.md` | Only what genuinely varies per repository: verification commands, a minimum capability floor, per-repository tier pinning. | Yes |
+
+### Per-section merge rules
+
+For each heading in `MODEL-SELECTION.md`:
+
+1. Start with the **packaged** default for that section.
+2. If the **user/machine** level defines the same section heading, merge its
+   content in. Sections present only in the user file are added; sections absent
+   from it leave the packaged default untouched.
+3. If the **repository** level defines the same section heading, merge its
+   content in last. Same rules: add new sections, override existing ones.
+
+Most-specific wins per section: if a section exists at a higher level it
+completely replaces the same section at lower levels; there is no field-by-field
+deep merge within a section.
+
+### Worked example
+
+Given these three files:
+
+**Packaged** (always present):
+```markdown
+## Difficulty rubric
+[default rubric — low/medium/high definitions]
+
+## Capability tiers
+[default tier definitions — Tier 1 through 4]
+
+## Escalation policy
+[default escalation rules]
+```
+
+**User/machine** (`~/.config/opencode/boss-issue-loop/MODEL-SELECTION.md`):
+```markdown
+## Capability tiers
+- **Tier 1** — `opencode/opencode-go/mimo-v2.5`
+- **Tier 2** — `opencode/opencode-go/gpt-5.6-luna` (low thinking)
+```
+
+**Repository** (`.agents/boss-issue-loop/MODEL-SELECTION.md`):
+```markdown
+## Capability tiers
+- **Tier 1** — `opencode/opencode-go/mimo-v2.5`
+- **Tier 2** — `codex/gpt-5.6-luna` (high thinking)
+```
+
+**Resolved output:**
+
+| Section | Source used | Why |
+|---------|-------------|-----|
+| Difficulty rubric | Packaged | No user or repository override for this section |
+| Capability tiers | Repository | Repository overrides user overrides packaged for this section |
+| Escalation policy | Packaged | No user or repository override for this section |
+
+The repository pins capability tiers without repeating the user's full roster
+and without restating the packaged escalation policy.
+
+### Absent, unreadable, or partially specified levels
+
+- **Absent** — missing file or directory: that level contributes nothing. The
+  next-more-specific level applies. If all three are absent for a section, the
+  section is empty and the coordinator reports it.
+- **Unreadable** — file exists but cannot be read (permission error, encoding
+  failure): warn at coordinator startup that the level was skipped, then
+  continue as if it were absent.
+- **Partially specified** — file exists and is readable but a particular section
+  is missing: that section is absent at this level; the lower level's version
+  applies. A file that overrides `Capability tiers` but not `Escalation policy`
+  inherits the escalation policy from whichever lower level defines it.
+
+### Coordinator reporting
+
+At the start of each run, report which levels contributed to the selected
+policy for each section. Example output:
+
+```
+Provider policy resolved:
+  Difficulty rubric     → packaged
+  Capability tiers      → repository (.agents/boss-issue-loop/MODEL-SELECTION.md)
+  Escalation policy     → packaged
+```
+
+If a level was skipped due to absence or unreadability, say so explicitly
+(e.g. `User/machine level skipped — file not found`).
 
 Rank each task `low`, `medium`, or `high` with a one-sentence rationale, and
 choose the lowest capable tier. Among equivalent providers, prefer the larger
