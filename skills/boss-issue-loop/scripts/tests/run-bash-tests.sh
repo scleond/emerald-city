@@ -147,6 +147,11 @@ test_codex_rpc_error() {
   assert_match "codex rpc-error: warning" "boom" "$(jq_field '.warning' "$r")"
 }
 
+test_codex_rpc_auth_error() {
+  local r; r="$(run_codex 'RPC_ERROR:codex login required')"
+  assert_eq "codex rpc-auth-error: status" "unavailable" "$(jq_field '.status' "$r")"
+}
+
 test_codex_clamp_high() {
   local r; r="$(run_codex '{"rateLimits":{"primary":{"usedPercent":130,"windowDurationMins":10080}}}')"
   assert_eq "codex clamp-high: remaining" "0" "$(jq_field '.weeklyRemainingPercent' "$r")"
@@ -190,12 +195,12 @@ test_opencode_go_403() {
 
 test_opencode_go_malformed_body() {
   local r; r="$(run_opencode_go 200 'not json')"
-  assert_eq "ocgo malformed: status" "unavailable" "$(jq_field '.status' "$r")"
+  assert_eq "ocgo malformed: status" "error" "$(jq_field '.status' "$r")"
 }
 
 test_opencode_go_empty_body() {
   local r; r="$(run_opencode_go 200 '')"
-  assert_eq "ocgo empty: status" "unavailable" "$(jq_field '.status' "$r")"
+  assert_eq "ocgo empty: status" "error" "$(jq_field '.status' "$r")"
 }
 
 test_opencode_go_curl_error() {
@@ -292,6 +297,7 @@ test_codex_malformed_null
 test_codex_malformed_empty
 test_codex_malformed_bad_percent
 test_codex_rpc_error
+test_codex_rpc_auth_error
 test_codex_clamp_high
 test_codex_clamp_low
 

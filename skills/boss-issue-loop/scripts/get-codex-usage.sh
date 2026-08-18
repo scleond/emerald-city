@@ -90,7 +90,12 @@ normalize_codex_response() {
     return
   fi
   if [[ "$result" == RPC_ERROR:* ]]; then
-    emit codex error null "" "$SOURCE" "Codex '$METHOD' RPC error: ${result#RPC_ERROR:}"
+    local rpc_msg="${result#RPC_ERROR:}"
+    if [[ "$rpc_msg" =~ auth|login|sign|unauthorized|401 ]]; then
+      emit codex unavailable null "" "$SOURCE" "Codex session is not available for rate-limit reads: $rpc_msg"
+    else
+      emit codex error null "" "$SOURCE" "Codex '$METHOD' RPC error: $rpc_msg"
+    fi
     return
   fi
   if [[ "$result" == "null" ]]; then
@@ -105,7 +110,7 @@ normalize_codex_response() {
         + [ ((.rateLimitsByLimitId // {}) | to_entries[] | .value.primary, .value.secondary) ])
       | map(select(type == "object"));
     windows | map(select(has("usedPercent") and .windowDurationMins == $wmin))[0] // null
-  ' <<<"$result")"
+  ' <<<"$result" 2>/dev/null || true)"
 
   if [[ -z "$window" || "$window" == "null" ]]; then
     emit codex unavailable null "" "$SOURCE" "No weekly rate-limit window was available in the codex response."

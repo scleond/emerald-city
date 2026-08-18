@@ -100,7 +100,7 @@ normalize_opencode_go_response() {
   local result="$1"
 
   if [[ -z "$result" ]]; then
-    emit opencode-go error null "" "$SOURCE" "Failed to read OpenCode Go usage: curl error."
+    emit opencode-go error null "" "$SOURCE" "Empty response from the OpenCode Go usage endpoint."
     return
   fi
   if [[ "$result" == HTTP_* ]]; then
@@ -118,7 +118,7 @@ normalize_opencode_go_response() {
   resets_raw="$(jq -r '.usage.weekly.resetsAt // .weeklyUsage.resetsAt // empty' <<<"$result" 2>/dev/null || true)"
 
   if [[ -z "$percent" ]] || ! [[ "$percent" =~ ^-?[0-9]+$ ]]; then
-    emit opencode-go unavailable null "" "$SOURCE" "No weekly usage window was available from the OpenCode Go endpoint."
+    emit opencode-go error null "" "$SOURCE" "OpenCode Go weekly window was present but the usage-percent value was unusable."
     return
   fi
 

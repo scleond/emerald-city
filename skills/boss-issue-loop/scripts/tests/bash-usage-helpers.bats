@@ -144,7 +144,7 @@ jq_field() { jq -r "$1" <<<"$2"; }
 
 @test "codex command failure: auth error" {
   result="$(run_codex 'RPC_ERROR:codex login required')"
-  [ "$(jq_field '.status' "$result")" = "error" ]
+  [ "$(jq_field '.status' "$result")" = "unavailable" ]
 }
 
 # --- Clamping ---------------------------------------------------------------
@@ -211,18 +211,18 @@ jq_field() { jq -r "$1" <<<"$2"; }
 
 @test "opencode-go malformed: invalid JSON body" {
   result="$(run_opencode_go 200 'not json')"
-  [ "$(jq_field '.status' "$result")" = "unavailable" ]
+  [ "$(jq_field '.status' "$result")" = "error" ]
   [ "$(jq_field '.weeklyRemainingPercent' "$result")" = "null" ]
 }
 
 @test "opencode-go malformed: empty body" {
   result="$(run_opencode_go 200 '')"
-  [ "$(jq_field '.status' "$result")" = "unavailable" ]
+  [ "$(jq_field '.status' "$result")" = "error" ]
 }
 
 @test "opencode-go malformed: unusable percent" {
   result="$(run_opencode_go 200 '{"usage":{"weekly":{"status":"ok","percent":"abc","resetsAt":"2026-08-17T00:00:00Z"}}}')"
-  [ "$(jq_field '.status' "$result")" = "unavailable" ]
+  [ "$(jq_field '.status' "$result")" = "error" ]
 }
 
 # --- Command-failure fixture ------------------------------------------------
