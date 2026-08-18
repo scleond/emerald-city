@@ -10,13 +10,27 @@ remains, or a concrete blocker requires the user.
 
 ## Scope selection
 
-When invoked with a native GitHub issue labeled `spec`, traverse only its
-complete native sub-issue descendant tree. Nested spec issues are organizational
-nodes, not implementation tickets. Select unblocked descendants dependency-first,
-then in tracker order. Ignore unrelated repository issues. Finish successfully
-only when every implementation descendant is closed; otherwise report the blocked
-descendants explicitly. Leave the parent spec open and report it ready for
-acceptance.
+When invoked with a native GitHub issue labeled `spec`, traverse its complete
+native sub-issue descendant tree using the query in
+[`SUB-ISSUE-TRAVERSAL.md`](SUB-ISSUE-TRAVERSAL.md). Native sub-issues are the
+`subIssues` GraphQL connection — body cross-references (`#N` mentions) do not
+qualify. Nested spec issues (also labeled `spec`) are organizational nodes, not
+implementation tickets: enumerate them, but select only their implementation
+descendants for work.
+
+### Zero-descendant guard
+
+If the spec issue has zero immediate sub-issues, report: `Spec #N has zero
+discovered implementation descendants — not eligible for loop processing.` Do
+not treat this as successful completion. A spec with no children has no work
+to select; the loop moves on.
+
+### Selection order
+
+Select unblocked descendants dependency-first, then in tracker order. Ignore
+unrelated repository issues. Finish successfully only when every
+implementation descendant is closed; otherwise report the blocked descendants
+explicitly. Leave the parent spec open and report it ready for acceptance.
 
 When no spec is selected, preserve the existing repository-wide behavior below,
 processing all open implementation issues in tracker order.
