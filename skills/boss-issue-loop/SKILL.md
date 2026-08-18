@@ -179,13 +179,18 @@ tracker state and report the unsupported operation.
 
 ## Issue Loop
 
+**Coordinator branch** is the branch the coordinator maintains for integration.
+Default: `main`. The accepted base commit is the coordinator branch head at the
+start of each iteration; the coordinator never advances the branch except in
+step 8.
+
 1. Read the repository issue-tracker docs, preferences, provider catalog, worktree status, configured orchestration policy and adapter, active agents, and open GitHub issues.
-2. Select the first unblocked issue in scope and tracker order. Confirm no active agent or workspace already owns its issue label. Record the accepted base commit.
+2. Select the first unblocked issue in scope and tracker order. Confirm no active agent or workspace already owns its issue label. Record the accepted base commit (the current HEAD of the coordinator branch).
 3. Through the adapter, create `issue-<number>-<slug>` from the accepted base commit. Pass the exact issue number, base commit, and workspace ID to the implementer.
-4. Render and send the Implementer Handoff Contract below. Fill every placeholder with the exact issue, accepted base, workspace, and repository-specific commands discovered in step 1. Keep the commit before the final ticket verification gate.
+4. Render and send the Implementer Handoff Contract below. Fill every placeholder with the exact issue, accepted base, workspace, and repository-specific commands discovered in step 1. The implementer must commit all changes before running the final ticket verification gate.
 5. Accept only a committed, linear, clean worktree whose verification gates pass. A clearly correctable stall gets one targeted recovery instruction; repeated failure, non-progress, scope corruption, or an explicit blocker follows the escalation policy in MODEL-SELECTION.md (archive the agent and its disposable worktree, retry from the accepted base at the next capability tier).
-6. Launch exactly two read-only reviewers in parallel, one from each review tier. Give both the fixed-point diff and issue specification, and deliver the Reviewer Contract below. Ask for concrete findings with file/line references and separate hard defects from advisory concerns.
-7. Verify every claimed failure yourself. Resolve actionable findings in the issue worktree, commit the fixes, and rerun the repository and ticket verification gates. Repeat review when a fix materially changes behavior.
+6. Launch exactly two independent read-only reviewers in parallel. Select review tiers appropriate to the ranked difficulty: `low` tasks draw from the lowest review tier, `medium` from the mid tier, and `high` from the highest available tier — always two distinct reviewers regardless of tier. Give both the fixed-point diff and issue specification, and deliver the Reviewer Contract below. Report which review tiers were selected and the difficulty-ranked rationale. Ask for concrete findings with file/line references and separate hard defects from advisory concerns.
+7. Verify every claimed failure yourself. Resolve actionable findings in the issue worktree, commit the fixes, and rerun the repository and ticket verification gates. Repeat review when a fix materially changes behavior — but archive the completed reviewers first to free a slot under the three-child-agent cap, then launch fresh reviewers. The implementer may be resumed once for bounded review fixes without archiving; if the resumed implementer fails or the fix materially changes behavior, archive it and escalate normally.
 8. Integrate only the verified commit into the coordinator branch with a non-interactive fast-forward or merge. Inspect status, diff, and log before integration.
 9. Push the integrated branch to its configured remote. Close the issue with a concise implementation and verification comment only after the push succeeds.
 10. Through the adapter, archive completed issue agents and disposable workspaces, including stale instances carrying the completed issue label. Preserve the commit and useful review evidence before cleanup.
