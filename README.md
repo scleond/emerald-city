@@ -1,6 +1,6 @@
 # Agent Skills
 
-Agent skills for code review, issue-driven development, and technical writing.
+Agent skills for issue-driven development and technical writing.
 
 ## Skills
 
