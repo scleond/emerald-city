@@ -20,30 +20,67 @@ choose the lowest capable tier that can do the job.
 
 ## Capability tiers
 
-Ordered lowest-capability first. Escalation moves up one tier at a time. Escalation is a problem with execution, not model availability. 
-Within a tier, entries are equivalent; ties are intentional — pick a random
-available provider and move to the next only on capacity failure.
+Ordered lowest-capability first. Escalation moves up one tier at a time.
+Escalation is a problem with execution, not model availability.
 
-If an agent fails to launch or complete twice, archive it, record its unavailability, and choose another reviewer model; never retry the same reviewer more than twice. A failed launch should choose another model in the same tier. 
+### Attempt budget
+
+- **One attempt per capability tier.** Stop after the highest tier fails.
+- **Launch and infrastructure failures do not consume a tier's attempt
+  budget.** A failed launch or infrastructure error (network timeout, rate
+  limit, provider outage) allows choosing another model in the same tier
+  without advancing the tier counter.
+- **Verification and quality failures consume a tier's attempt.** A failed
+  verification gate, test suite failure, or quality rejection counts as the
+  tier's single attempt.
+- If an agent fails to launch or complete twice, archive it, record its
+  unavailability, and choose another model in the same tier. Never retry the
+  same model more than twice.
+
+### Tier definitions
+
+- **Tier 1** — Single-file, well-specified tasks. The agent reads a small
+  scope, applies a focused change, and passes a straightforward verification
+  gate.
+- **Tier 2** — Multi-file or multi-concept changes with modest interaction.
+  The agent reads neighbouring code, writes focused tests, and resolves
+  straightforward failures.
+- **Tier 3** — Focused multi-file work requiring deeper reasoning. The agent
+  reconciles cross-file dependencies, debugs subtle interaction failures, and
+  validates behavior across components.
+- **Tier 4** — Cross-cutting, ambiguous, or architecture-affecting work. The
+  agent reasons across the full codebase, reconciles conflicting constraints,
+  and produces changes that affect many files and components.
+
+### Worked example roster
+
+The following roster is provided as a concrete reference only. **It is not
+read as policy.** A user/machine or repository override replaces it entirely
+when present.
 
 Implementation tiers:
 
-- **Tier 1** — `opencode/opencode-go/mimo-v2.5`
-- **Tier 2** — `opencode/opencode-go/gpt-5.6-luna` (low thinking);`codex/gpt-5.6-luna`(low thinking); `opencode/opencode-go/deepseek-v4-flash`
-- **Tier 3** — `codex/gpt-5.6-luna` (high thinking); `codex/gpt-5.6-terra` (medium thinking)`; `codex/gpt-5.6-sol`(low thinking)
-- **Tier 4** - `codex/gpt-5.6-sol`(high thinking)
+- **Tier 1** — `{ provider: "opencode", model: "opencode-go/mimo-v2.5", effort: "low" }`
+- **Tier 2** — `{ provider: "opencode", model: "opencode-go/gpt-5.6-luna", effort: "low" }`, `{ provider: "codex", model: "gpt-5.6-luna", effort: "low" }`, `{ provider: "opencode", model: "opencode-go/deepseek-v4-flash", effort: "low" }`
+- **Tier 3** — `{ provider: "codex", model: "gpt-5.6-luna", effort: "high" }`, `{ provider: "codex", model: "gpt-5.6-terra", effort: "medium" }`, `{ provider: "codex", model: "gpt-5.6-sol", effort: "low" }`
+- **Tier 4** — `{ provider: "codex", model: "gpt-5.6-sol", effort: "high" }`
 
 Review tiers:
 
-- **Tier 1** — `opencode/opencode-go/mimo-v2.5`; `opencode/mimo-v2.5-free`; `opencode/deepseek-v4-flash-free`; `opencode/hy3-free`; `opencode/nemotron-3.5-lightning-free`; `opencode/nemotron-3-ultra-free`; `opencode/laguna-s-2.1-free`
-- **Tier 2** — `opencode/opencode-go/qwen3.7-plus`; `codex/gpt-5.6-luna`(low thinking)
+- **Tier 1** — `{ provider: "opencode", model: "opencode-go/mimo-v2.5", effort: "low" }`, `{ provider: "opencode", model: "mimo-v2.5-free", effort: "low" }`, `{ provider: "opencode", model: "deepseek-v4-flash-free", effort: "low" }`, `{ provider: "opencode", model: "hy3-free", effort: "low" }`, `{ provider: "opencode", model: "nemotron-3.5-lightning-free", effort: "low" }`, `{ provider: "opencode", model: "nemotron-3-ultra-free", effort: "low" }`, `{ provider: "opencode", model: "laguna-s-2.1-free", effort: "low" }`
+- **Tier 2** — `{ provider: "opencode", model: "opencode-go/qwen3.7-plus", effort: "low" }`, `{ provider: "codex", model: "gpt-5.6-luna", effort: "low" }`
 
 ## Capacity tie-breaking
 
-Among equivalent providers, prefer the one with the larger remaining weekly
-usage percentage when comparable usage data is available. When comparable data
-is unavailable, keep the stable order above and report the unavailable data
-rather than guessing.
+Among equivalent providers in the same tier, use exactly one tie-break rule:
+
+1. If both candidates report `status: ok`, prefer the one with the larger
+   remaining weekly usage percentage.
+2. Otherwise, use the stable declared order.
+
+Use the provider usage helpers in [`USAGE-HELPERS.md`](USAGE-HELPERS.md) to
+obtain normalized weekly capacity. Compare only when equivalent providers both
+report `status: ok`.
 
 ## Escalation policy
 

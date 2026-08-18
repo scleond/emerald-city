@@ -70,15 +70,15 @@ Given these three files:
 **User/machine** (`~/.config/opencode/boss-issue-loop/MODEL-SELECTION.md`):
 ```markdown
 ## Capability tiers
-- **Tier 1** — `opencode/opencode-go/mimo-v2.5`
-- **Tier 2** — `opencode/opencode-go/gpt-5.6-luna` (low thinking)
+- **Tier 1** — `{ provider: "opencode", model: "opencode-go/mimo-v2.5", effort: "low" }`
+- **Tier 2** — `{ provider: "opencode", model: "opencode-go/gpt-5.6-luna", effort: "low" }`
 ```
 
 **Repository** (`.agents/boss-issue-loop/MODEL-SELECTION.md`):
 ```markdown
 ## Capability tiers
-- **Tier 1** — `opencode/opencode-go/mimo-v2.5`
-- **Tier 2** — `codex/gpt-5.6-luna` (high thinking)
+- **Tier 1** — `{ provider: "opencode", model: "opencode-go/mimo-v2.5", effort: "low" }`
+- **Tier 2** — `{ provider: "codex", model: "gpt-5.6-luna", effort: "high" }`
 ```
 
 **Resolved output:**
@@ -121,13 +121,12 @@ If a level was skipped due to absence or unreadability, say so explicitly
 (e.g. `User/machine level skipped — file not found`).
 
 Rank each task `low`, `medium`, or `high` with a one-sentence rationale, and
-choose the lowest capable tier. Among equivalent providers, prefer the larger
-remaining weekly usage percentage when comparable data is available; otherwise
-use the stable order and report the unavailable capacity data. Use the provider
-usage helpers in [`USAGE-HELPERS.md`](USAGE-HELPERS.md) to obtain normalized
-weekly capacity; compare only when equivalent providers both report
-`status: ok`. Keep at most one writer per worktree, two reviewers, and three
-child agents total.
+choose the lowest capable tier. Among equivalent providers, if both report
+`status: ok` prefer the larger remaining weekly usage percentage; otherwise use
+the stable declared order. Use the provider usage helpers in
+[`USAGE-HELPERS.md`](USAGE-HELPERS.md) to obtain normalized weekly capacity.
+Keep at most one writer per worktree, two reviewers, and three child agents
+total.
 
 ## Orchestration
 
