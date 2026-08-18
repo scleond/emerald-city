@@ -20,22 +20,22 @@ choose the lowest capable tier that can do the job.
 
 ## Capability tiers
 
-Ordered lowest-capability first. Escalation moves up one tier at a time.
-Within a tier, entries are equivalent; ties are intentional — pick the first
+Ordered lowest-capability first. Escalation moves up one tier at a time. Escalation is a problem with execution, not model availability. 
+Within a tier, entries are equivalent; ties are intentional — pick a random
 available provider and move to the next only on capacity failure.
 
-If an agent fails to launch or complete twice, archive it, record its unavailability, and move to the next reviewer model; never retry the same reviewer more than twice.
+If an agent fails to launch or complete twice, archive it, record its unavailability, and choose another reviewer model; never retry the same reviewer more than twice. A failed launch should choose another model in the same tier. 
 
 Implementation tiers:
 
-- **Tier 1** — `opencode/opencode-go/deepseek-v4-flash`
-- **Tier 2** — `opencode/opencode-go/gpt-5.6-luna` (low thinking);`codex/gpt-5.6-luna`(low thinking)
+- **Tier 1** — `opencode/opencode-go/mimo-v2.5`
+- **Tier 2** — `opencode/opencode-go/gpt-5.6-luna` (low thinking);`codex/gpt-5.6-luna`(low thinking); `opencode/opencode-go/deepseek-v4-flash`
 - **Tier 3** — `codex/gpt-5.6-luna` (high thinking); `codex/gpt-5.6-terra` (medium thinking)`; `codex/gpt-5.6-sol`(low thinking)
 - **Tier 4** - `codex/gpt-5.6-sol`(high thinking)
 
 Review tiers:
 
-- **Tier 1** — `opencode/opencode-go/mimo-v2.5`; `opencode/opencode/nemotron-3-ultra-free`
+- **Tier 1** — `opencode/opencode-go/mimo-v2.5`; `opencode/mimo-v2.5-free`; `opencode/deepseek-v4-flash-free`; `opencode/hy3-free`; `opencode/nemotron-3.5-lightning-free`; `opencode/nemotron-3-ultra-free`; `opencode/laguna-s-2.1-free`
 - **Tier 2** — `opencode/opencode-go/qwen3.7-plus`; `codex/gpt-5.6-luna`(low thinking)
 
 ## Capacity tie-breaking
