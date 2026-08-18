@@ -43,16 +43,13 @@ run_opencode_go() {
     export OPENCODE_GO_USAGE_TIMEOUT="5"
     source "$OPENCODE_SCRIPT"
     fetch_opencode_go_usage() {
-      local key="$1"
-      local body_file="$2"
-      printf '%s' "$body" > "$body_file"
       case "$http_code" in
-        200) echo "200";;
-        401) echo "401";;
-        403) echo "403";;
-        500) echo "500";;
+        200) echo "$body";;
+        401) echo "HTTP_401";;
+        403) echo "HTTP_403";;
+        500) echo "HTTP_500";;
         "")  echo "";;
-        *)   echo "$http_code";;
+        *)   echo "HTTP_$http_code";;
       esac
     }
     main

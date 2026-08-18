@@ -86,21 +86,36 @@ fetch_opencode_go_usage() {
     -o "$body_file" -w '%{http_code}' "$ENDPOINT" 2>/dev/null || true)"
 
   if [[ -z "$http_code" ]]; then
+    return
+  fi
+  if [[ "$http_code" == "401" || "$http_code" == "403" || "$http_code" != "200" ]]; then
+    echo "HTTP_$http_code"
+    return
+  fi
+
+  cat "$body_file"
+}
+
+normalize_opencode_go_response() {
+  local result="$1"
+
+  if [[ -z "$result" ]]; then
     emit opencode-go error null "" "$SOURCE" "Failed to read OpenCode Go usage: curl error."
     return
   fi
-  if [[ "$http_code" == "401" || "$http_code" == "403" ]]; then
-    emit opencode-go unavailable null "" "$SOURCE" "OpenCode Go returned HTTP $http_code; the API key is invalid or has no Go subscription."
-    return
-  fi
-  if [[ "$http_code" != "200" ]]; then
-    emit opencode-go error null "" "$SOURCE" "OpenCode Go usage endpoint returned unexpected HTTP $http_code."
+  if [[ "$result" == HTTP_* ]]; then
+    local code="${result#HTTP_}"
+    if [[ "$code" == "401" || "$code" == "403" ]]; then
+      emit opencode-go unavailable null "" "$SOURCE" "OpenCode Go returned HTTP $code; the API key is invalid or has no Go subscription."
+    else
+      emit opencode-go error null "" "$SOURCE" "OpenCode Go usage endpoint returned unexpected HTTP $code."
+    fi
     return
   fi
 
   local percent resets_raw
-  percent="$(jq -r '.usage.weekly.percent // .usage.weekly.usagePercent // .weeklyUsage.percent // .weeklyUsage.usagePercent // empty' "$body_file" 2>/dev/null || true)"
-  resets_raw="$(jq -r '.usage.weekly.resetsAt // .weeklyUsage.resetsAt // empty' "$body_file" 2>/dev/null || true)"
+  percent="$(jq -r '.usage.weekly.percent // .usage.weekly.usagePercent // .weeklyUsage.percent // .weeklyUsage.usagePercent // empty' <<<"$result" 2>/dev/null || true)"
+  resets_raw="$(jq -r '.usage.weekly.resetsAt // .weeklyUsage.resetsAt // empty' <<<"$result" 2>/dev/null || true)"
 
   if [[ -z "$percent" ]] || ! [[ "$percent" =~ ^-?[0-9]+$ ]]; then
     emit opencode-go unavailable null "" "$SOURCE" "No weekly usage window was available from the OpenCode Go endpoint."
@@ -136,7 +151,9 @@ main() {
   body_file="$(mktemp)"
   trap 'rm -f "$body_file"' RETURN
 
-  fetch_opencode_go_usage "$key" "$body_file"
+  local result
+  result="$(fetch_opencode_go_usage "$key" "$body_file")"
+  normalize_opencode_go_response "$result"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
