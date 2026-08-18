@@ -20,10 +20,11 @@ descendants for work.
 
 ### Zero-descendant guard
 
-If the spec issue has zero immediate sub-issues, report: `Spec #N has zero
+If the spec issue has zero implementation descendants (issues not labeled
+`spec`) after traversing the full descendant tree, report: `Spec #N has zero
 discovered implementation descendants — not eligible for loop processing.` Do
-not treat this as successful completion. A spec with no children has no work
-to select; the loop moves on.
+not treat this as successful completion. A spec with no implementation work to
+select; the loop moves on.
 
 ### Selection order
 

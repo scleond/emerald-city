@@ -123,8 +123,9 @@ query($owner: String!, $repo: String!, $issueNumber: Int!, $cursor: String) {
 - **Nested spec issues** (label `spec`) are organisational nodes, not
   implementation tickets. The traversal enumerates them, but scope selection
   filters them out of the work list — their children are traversed separately.
-- **Zero descendants.** If a spec issue has zero immediate sub-issues, that is
-  a distinct condition from "all descendants closed." Report it explicitly:
+- **Zero descendants.** If a spec issue has zero implementation descendants
+  (issues not labeled `spec`) after traversing the full descendant tree, that
+  is a distinct condition from "all descendants closed." Report it explicitly:
   `Spec #N has zero discovered implementation descendants — not eligible for
   loop processing.`
 - **Verified against** issue #7 in `scleond/emerald-city`: 9 immediate
