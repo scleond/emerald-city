@@ -6,9 +6,10 @@ import {
   type ObservatoryViewModel,
   type ObservatoryWorkspaceSnapshot,
 } from "./observation";
-import { normalizeTimelineEntry, type NormalizedTimelineEntry, type RawTimelineEntry } from "./observation";
+import { normalizeTimelineEntry, TIMELINE_DETAIL_LIMIT, TIMELINE_SUMMARY_LIMIT, type AgentLifecycle, type NormalizedTimelineEntry, type RawTimelineEntry } from "./observation";
 
-export type ObservatoryPaseoApi = Pick<PaseoApi, "workspaces" | "agents">;
+export interface TimelineRef { refetch(input?: { limit?: number; cursor?: { epoch: string; seq: number }; direction?: string }): Promise<{ entries?: RawTimelineEntry[]; pageInfo?: { cursor?: { epoch: string; seq: number }; hasOlder?: boolean } }> }
+export type ObservatoryPaseoApi = Omit<Pick<PaseoApi, "workspaces" | "agents">, "agents"> & { agents: Pick<PaseoApi["agents"], "list" | "subscribe"> & { ref(agentId: string): { timeline: TimelineRef } } };
 
 export type ProjectObservationState =
   | { phase: "loading" }
@@ -37,6 +38,8 @@ export class ProjectObservationController {
   private refreshing = false;
   private directorySubscriptionsActive = false;
   private readonly timelines = new Map<string, TimelineState>();
+  private query = "";
+  private lifecycles: AgentLifecycle[] = [];
 
   constructor(
     private readonly paseo: ObservatoryPaseoApi,
@@ -53,6 +56,7 @@ export class ProjectObservationController {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
+  setFilters(query: string, lifecycles: AgentLifecycle[] = []): void { this.query = query; this.lifecycles = lifecycles; this.publishReady(); }
 
   async start(): Promise<void> {
     if (this.active) return;
@@ -101,12 +105,18 @@ export class ProjectObservationController {
     if (current.loading || (older && !current.hasOlder)) return;
     this.timelines.set(agentId, { ...current, loading: true, error: undefined }); this.publishReady();
     try {
-      const ref = this.paseo.agents.ref(agentId) as unknown as { timeline: { refetch(input: unknown): Promise<{ entries?: RawTimelineEntry[]; pageInfo?: { cursor?: { epoch: string; seq: number }; hasOlder?: boolean } }> } };
-      const page = await ref.timeline.refetch({ limit: 50, ...(older && current.cursor ? { cursor: current.cursor } : {}), direction: "backward" });
+      const page = await this.paseo.agents.ref(agentId).timeline.refetch({ limit: TIMELINE_DETAIL_LIMIT, ...(older && current.cursor ? { cursor: current.cursor } : {}), direction: "backward" });
       const entries = (page.entries ?? []).map(normalizeTimelineEntry);
       this.timelines.set(agentId, { entries: older ? [...current.entries, ...entries].slice(-50) : entries.slice(0, 50), cursor: page.pageInfo?.cursor, hasOlder: page.pageInfo?.hasOlder ?? false, loading: false });
     } catch (error) { this.timelines.set(agentId, { ...current, loading: false, error: error instanceof Error ? error.message : String(error) }); }
     this.publishReady();
+  }
+  async loadTimelineSummary(agentId: string): Promise<void> {
+    try {
+      const page = await this.paseo.agents.ref(agentId).timeline.refetch({ limit: TIMELINE_SUMMARY_LIMIT, direction: "backward" });
+      this.timelines.set(agentId, { entries: (page.entries ?? []).map(normalizeTimelineEntry), cursor: page.pageInfo?.cursor, hasOlder: page.pageInfo?.hasOlder ?? false, loading: false });
+      this.publishReady();
+    } catch { /* Summary data is optional; directory data remains usable. */ }
   }
 
   private receiveWorkspace(
@@ -171,6 +181,7 @@ export class ProjectObservationController {
       for (const agent of agents) {
         if (this.workspaces.has(agent.workspaceId)) this.agents.set(agent.id, agent);
       }
+      for (const agent of this.agents.values()) void this.loadTimelineSummary(agent.id);
       if (this.workspaces.size === 0) {
         this.publish({
           phase: "unavailable",
@@ -232,7 +243,7 @@ export class ProjectObservationController {
       view: createProjectObservation(
         this.project,
         [...this.workspaces.values()],
-        [...this.agents.values()],
+        [...this.agents.values()], { query: this.query, lifecycles: this.lifecycles },
       ),
       timeline: Object.fromEntries(this.timelines),
     });

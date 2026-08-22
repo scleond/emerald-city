@@ -60,6 +60,8 @@ export function normalizeTimelineEntry(entry: RawTimelineEntry): NormalizedTimel
   else if (type === "tool_call") { category = item.status === "failed" ? "failure" : "tool_activity"; label = category === "failure" ? "Failure" : "Tool activity"; }
   else if (type === "error") { category = "failure"; label = "Failure"; }
   else if (type === "status_change") { category = "status_change"; label = "Status change"; }
+  else if (type === "permission_request") { category = "permission_request"; label = "Permission request"; }
+  else if (type === "completion") { category = "completion"; label = "Completion"; }
   return { category, label, summary, at: entry.timestamp ?? String(item.timestamp ?? "") };
 }
 export function synthesizeAttentionEntry(agent: ObservatoryAgentSnapshot): NormalizedTimelineEntry | null { if (!agent.requiresAttention) return null; const category = agent.attentionReason === "permission" ? "permission_request" : agent.attentionReason === "finished" ? "completion" : agent.attentionReason === "error" ? "failure" : "status_change"; return { category, label: category === "permission_request" ? "Permission request" : category === "completion" ? "Completion" : category === "failure" ? "Failure" : "Status change", summary: agent.status, at: agent.updatedAt }; }
