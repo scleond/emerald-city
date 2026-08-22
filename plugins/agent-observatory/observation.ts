@@ -158,6 +158,7 @@ export function aggregateModelUsage(
   }[],
 ): ModelUsageBar[] {
   const byModel = new Map<string, ModelUsageBar>();
+  const costCounts = new Map<string, { known: number; total: number }>();
   for (const agent of agents) {
     for (const turn of agent.usage.finalizedTurns) {
       const model = turn.model ?? agent.model ?? "unknown";
@@ -172,18 +173,21 @@ export function aggregateModelUsage(
         costState: "unknown",
       };
       const input = turn.inputTokens ?? 0;
-      const cached = Math.min(turn.cachedInputTokens ?? 0, input);
+      const cached = Math.min(Math.max(0, turn.cachedInputTokens ?? 0), Math.max(0, input));
       const output = turn.outputTokens ?? 0;
       bar.freshInputTokens += Math.max(0, input - cached);
       bar.cachedInputTokens += cached;
       bar.outputTokens += output;
       bar.totalTokens += input + output;
       if (turn.costUsd !== null) bar.reportedCostUsd = (bar.reportedCostUsd ?? 0) + turn.costUsd;
-      bar.costState = bar.costState === "unknown" ? (turn.costUsd === null ? "unknown" : "partial") : turn.costUsd === null ? "partial" : bar.costState;
+      const counts = costCounts.get(model) ?? { known: 0, total: 0 };
+      counts.total++;
+      if (turn.costUsd !== null) counts.known++;
+      costCounts.set(model, counts);
       byModel.set(model, bar);
     }
   }
-  return [...byModel.values()].map((bar) => ({ ...bar, costState: bar.costState === "partial" && bar.reportedCostUsd !== null ? "partial" : bar.costState })).sort((left, right) => right.totalTokens - left.totalTokens || left.model.localeCompare(right.model));
+  return [...byModel.values()].map((bar) => { const counts = costCounts.get(bar.model)!; const costState: CostState = counts.known === 0 ? "unknown" : counts.known === counts.total ? "complete" : "partial"; return { ...bar, costState }; }).sort((left, right) => right.totalTokens - left.totalTokens || left.model.localeCompare(right.model));
 }
 
 export interface ObservatoryAgentSnapshot {
@@ -232,18 +236,17 @@ export function createProjectObservation(project: ObservatoryProject, workspaceS
     if (parent && keptIds.has(parent.id) && parent.workspaceId === agent.workspaceId) { agent.parentTitle = parent.title; agent.parentWorkspaceId = parent.workspaceId; }
     else if (parent) { agent.parentTitle = parent.title; agent.parentWorkspaceId = parent.workspaceId; }
     else if (parentId) { agent.parentTitle = null; agent.parentWorkspaceId = null; }
-     agent.depth = parent && keptIds.has(parent.id) ? (parent.depth + 1) : 0;
+     agent.depth = parent && keptIds.has(parent.id) && parent.workspaceId === agent.workspaceId ? (parent.depth + 1) : 0;
     agent.switchedModels =
       new Set(agent.usageTurns.filter((turn) => !turn.provisional).map((turn) => turn.model ?? agent.model)).size > 1;
   }
-  const allTree = treeOrder(kept);
-  const workspaces = active.map(w => ({ id: w.id, name: w.name, agents: allTree.filter((agent) => agent.workspaceId === w.id) }));
-  const agents = allTree;
+  const workspaces = active.map(w => ({ id: w.id, name: w.name, agents: treeOrder(kept.filter((agent) => agent.workspaceId === w.id)) }));
+  const agents = workspaces.flatMap((workspace) => workspace.agents);
   return { project, counts, models: aggregateModelUsage(agents.map((agent) => ({ model: agent.model, usage: { finalizedTurns: agent.usageTurns, provisionalTurn: null } }))), dashboard: projectDashboard(agents, workspaces), workspaces };
 }
-function treeOrder(agents: ObservatoryAgentView[], allAgents = agents): ObservatoryAgentView[] {
+function treeOrder(agents: ObservatoryAgentView[]): ObservatoryAgentView[] {
   const children = new Map<string, ObservatoryAgentView[]>(); const roots: ObservatoryAgentView[] = [];
-  for (const a of agents) { const p = a.parentId && allAgents.some(x => x.id === a.parentId) ? a.parentId : null; if (p) (children.get(p) ?? (children.set(p, []), children.get(p)!)).push(a); else roots.push(a); }
+  for (const a of agents) { const p = a.parentId && agents.some(x => x.id === a.parentId && x.workspaceId === a.workspaceId) ? a.parentId : null; if (p) (children.get(p) ?? (children.set(p, []), children.get(p)!)).push(a); else roots.push(a); }
   const out: ObservatoryAgentView[] = []; const visit = (a: ObservatoryAgentView, depth: number) => { a.depth = depth; out.push(a); for (const child of (children.get(a.id) ?? []).sort(compareAgents)) visit(child, depth + 1); };
   for (const root of roots.sort(compareAgents)) visit(root, 0); return out;
 }

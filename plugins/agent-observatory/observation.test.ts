@@ -23,13 +23,14 @@ describe("projectDashboard", () => {
   });
 
   it("distinguishes partial and wholly unknown cost and sorts models by totals", () => {
-    const turn = (model: string, costUsd: number | null, inputTokens: number) => ({ turnId: null, model, inputTokens, cachedInputTokens: null, outputTokens: 0, costUsd, contextUsedTokens: null, contextMaxTokens: null, provisional: false });
+    const turn = (model: string, costUsd: number | null, inputTokens: number, cachedInputTokens: number | null = null) => ({ turnId: null, model, inputTokens, cachedInputTokens, outputTokens: 0, costUsd, contextUsedTokens: null, contextMaxTokens: null, provisional: false });
     const agentBase = (id: string, usageTurns: ObservatoryAgentUsageTurn[]) => ({ id, workspaceId: "w", title: id, status: "closed", lifecycle: "finished" as const, updatedAt: "", parentId: null, parentTitle: null, parentWorkspaceId: null, depth: 0, model: null, usageTurns, switchedModels: false });
-    const dashboard = projectDashboard([agentBase("a", [turn("unknown-model", null, 2), turn("known-model", 3, 1)]), agentBase("b", [turn("known-model", 4, 10)])], [{ id: "w", name: "Main", agents: [] }]);
+    const dashboard = projectDashboard([agentBase("a", [turn("unknown-model", null, 2), turn("known-model", 3, 1, -4)]), agentBase("b", [turn("known-model", 4, 10)])], [{ id: "w", name: "Main", agents: [] }]);
     expect(dashboard.costState).toBe("partial");
     expect(dashboard.reportedCostUsd).toBe(7);
     expect(dashboard.models.map((model) => model.model)).toEqual(["known-model", "unknown-model"]);
     expect(dashboard.models[0]?.provider).toBeNull();
+    expect(dashboard.models[0]).toMatchObject({ costState: "complete", cachedInputTokens: 0, freshInputTokens: 11 });
     expect(projectDashboard([agentBase("a", [turn("x", null, 0)])], []).reportedCostUsd).toBeNull();
   });
 });
