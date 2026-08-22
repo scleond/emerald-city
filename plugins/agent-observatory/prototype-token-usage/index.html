@@ -1,0 +1,384 @@
+<!doctype html>
+<!--
+  THROWAWAY PROTOTYPE — not production plugin code.
+  Three single-workspace token-usage variants, switchable via ?variant=bars|table|timeline.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Observatory token-usage prototype</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #080c11;
+        --surface: #10161e;
+        --surface-2: #151d27;
+        --surface-3: #1a2431;
+        --line: #273344;
+        --text: #eef3f8;
+        --muted: #8e9cac;
+        --green: #58d18e;
+        --blue: #79a8ff;
+        --violet: #b491ff;
+        --amber: #efb95d;
+        --red: #ff747d;
+        --fresh: #7aa7ff;
+        --cached: #355886;
+        --output: #58d18e;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      body { min-width: 340px; min-height: 100vh; margin: 0; background: var(--bg); color: var(--text); }
+      button, input, select { font: inherit; color: inherit; }
+      button { cursor: pointer; }
+      .shell { min-height: 100vh; display: grid; grid-template-columns: 68px 1fr; }
+      .rail { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; align-items: center; gap: 11px; padding: 17px 10px; border-right: 1px solid var(--line); background: #0b1017; }
+      .brand { display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 9px; border-radius: 12px; background: var(--green); color: #07110c; font-weight: 900; }
+      .rail-icon { width: 42px; height: 42px; border: 0; border-radius: 11px; background: transparent; color: var(--muted); cursor: default; }
+      .rail-icon.active { color: var(--text); background: var(--surface-2); outline: 1px solid var(--line); }
+      .rail-grow { flex: 1; }
+      .topbar { min-height: 58px; display: flex; align-items: center; gap: 10px; padding: 10px 22px; border-bottom: 1px solid var(--line); background: #0c1118; }
+      .online { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgb(88 209 142 / 11%); }
+      .topbar strong { font-size: 12px; }
+      .topbar span { color: var(--muted); font-size: 10px; }
+      .topbar .grow { flex: 1; }
+      .prototype-mark { padding: 5px 8px; border: 1px dashed #5e6c7f; border-radius: 7px; font: 700 9px ui-monospace, monospace; letter-spacing: .08em; }
+
+      main { min-width: 0; padding: 23px 26px 108px; }
+      .heading { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 18px; }
+      .eyebrow { color: var(--green); font-size: 10px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+      h1 { margin: 4px 0 5px; font-size: clamp(25px, 3vw, 34px); letter-spacing: -.04em; }
+      .subtle { margin: 0; color: var(--muted); font-size: 12px; }
+      .state { margin-left: auto; max-width: 480px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: #aab8c7; font: 10px/1.45 ui-monospace, monospace; }
+      .summary { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 10px; margin-bottom: 14px; }
+      .summary-card { padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface); }
+      .summary-card b { display: block; margin-bottom: 3px; font-size: 21px; letter-spacing: -.03em; }
+      .summary-card span { color: var(--muted); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+      .summary-card em { display: block; margin-top: 6px; color: #acb8c6; font-size: 9px; font-style: normal; }
+      .panel { min-width: 0; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); overflow: hidden; }
+      .panel-head { min-height: 49px; display: flex; align-items: center; gap: 8px; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+      .panel-head h2 { margin: 0; font-size: 12px; }
+      .panel-head span { color: var(--muted); font-size: 9px; }
+      .panel-head .push { margin-left: auto; }
+      .legend { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 9px; }
+      .legend i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 2px; }
+      .fresh { background: var(--fresh); }
+      .cached { background: var(--cached); }
+      .output { background: var(--output); }
+      .model-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+      .notice { padding: 8px 11px; border: 1px solid #3e4b5c; border-radius: 8px; background: #121b26; color: #a7b5c5; font-size: 9px; line-height: 1.45; }
+
+      /* Variant A: bars + selection */
+      .model-bars { display: grid; gap: 12px; padding: 15px; }
+      .model-row { display: grid; grid-template-columns: 180px minmax(220px, 1fr) 105px; align-items: center; gap: 13px; }
+      .model-name strong { display: block; font-size: 11px; }
+      .model-name span { color: var(--muted); font-size: 9px; }
+      .stack { display: flex; height: 15px; overflow: hidden; border-radius: 4px; background: #1d2632; }
+      .stack span { min-width: 2px; }
+      .bar-number { text-align: right; font: 10px ui-monospace, monospace; }
+      .bars-grid { display: grid; grid-template-columns: minmax(330px, .75fr) minmax(500px, 1.35fr); gap: 13px; margin-top: 13px; }
+      .agent-tree { padding: 7px; }
+      .agent-row { width: 100%; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 9px 10px; border: 1px solid transparent; border-radius: 9px; background: transparent; text-align: left; }
+      .agent-row:hover { background: var(--surface-2); }
+      .agent-row.selected { border-color: #3a4b62; background: #192535; }
+      .agent-row.child { padding-left: 28px; }
+      .agent-row.grandchild { padding-left: 49px; }
+      .avatar { display: grid; place-items: center; width: 27px; height: 27px; border-radius: 8px; background: #283548; color: #dce6f1; font-size: 9px; font-weight: 800; }
+      .agent-row strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+      .agent-row small { display: block; margin-top: 2px; color: var(--muted); font-size: 8px; }
+      .agent-total { text-align: right; font: 9px ui-monospace, monospace; }
+      .status-line { display: block; margin-top: 3px; color: var(--muted); font: 8px ui-monospace, monospace; }
+      .selected-agent { padding: 15px; }
+      .agent-title { display: flex; align-items: center; gap: 11px; margin-bottom: 14px; }
+      .agent-title .avatar { width: 38px; height: 38px; }
+      .agent-title h3 { margin: 0 0 4px; font-size: 16px; }
+      .agent-title p { margin: 0; color: var(--muted); font-size: 9px; }
+      .agent-title .agent-cost { margin-left: auto; text-align: right; }
+      .agent-cost b { display: block; font-size: 16px; }
+      .agent-cost span { color: var(--muted); font-size: 8px; }
+      .turn-chart { height: 220px; display: flex; align-items: end; gap: 12px; padding: 24px 12px 26px; border: 1px solid var(--line); border-radius: 10px; background: #0d131b; }
+      .turn-column { position: relative; flex: 1; min-width: 34px; max-width: 82px; height: 100%; display: flex; flex-direction: column; justify-content: end; }
+      .turn-stack { display: flex; flex-direction: column-reverse; width: 100%; overflow: hidden; border-radius: 5px 5px 2px 2px; }
+      .turn-stack span { width: 100%; min-height: 2px; }
+      .turn-label { position: absolute; top: calc(100% + 7px); width: 100%; color: var(--muted); text-align: center; font: 8px ui-monospace, monospace; }
+      .turn-model { position: absolute; bottom: calc(100% + 5px); width: 100%; overflow: hidden; color: #bbc7d4; text-align: center; text-overflow: ellipsis; white-space: nowrap; font-size: 7px; }
+      .context-row { display: grid; grid-template-columns: 130px 1fr 58px; align-items: center; gap: 10px; margin-top: 12px; color: var(--muted); font-size: 9px; }
+      .context-track { height: 7px; overflow: hidden; border-radius: 999px; background: #202b38; }
+      .context-track span { display: block; height: 100%; border-radius: inherit; background: var(--violet); }
+
+      /* Variant B: ranked ledger */
+      .ledger-layout { display: grid; grid-template-columns: minmax(240px, .46fr) minmax(650px, 1.54fr); gap: 13px; }
+      .model-rank { padding: 10px; display: grid; gap: 8px; }
+      .rank-card { padding: 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); }
+      .rank-top { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+      .rank-top strong { font-size: 10px; }
+      .rank-top b { margin-left: auto; font: 10px ui-monospace, monospace; }
+      .thin-bar { height: 6px; overflow: hidden; border-radius: 999px; background: #253141; }
+      .thin-bar span { display: block; height: 100%; border-radius: inherit; }
+      .ledger-scroll { overflow-x: auto; }
+      .ledger { min-width: 760px; }
+      .ledger-head, .ledger-row { display: grid; grid-template-columns: minmax(190px, 1.2fr) 170px 90px 85px 82px 25px; align-items: center; gap: 10px; padding: 11px 14px; }
+      .ledger-head { border-bottom: 1px solid var(--line); color: var(--muted); font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
+      .ledger-row { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; }
+      .ledger-row:hover, .ledger-row.open { background: var(--surface-2); }
+      .agent-cell { display: flex; align-items: center; gap: 8px; }
+      .agent-cell strong { display: block; font-size: 10px; }
+      .agent-cell small { color: var(--muted); font-size: 8px; }
+      .model-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 9px; }
+      .mono { font: 9px ui-monospace, monospace; }
+      .delta-up { color: var(--amber); }
+      .ledger-detail { display: none; padding: 13px 15px 16px; border-bottom: 1px solid var(--line); background: #0d131b; }
+      .ledger-detail.open { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
+      .breakdown { display: grid; gap: 8px; }
+      .break-row { display: grid; grid-template-columns: 85px 1fr 75px; align-items: center; gap: 8px; color: var(--muted); font-size: 9px; }
+      .break-track { height: 8px; overflow: hidden; border-radius: 3px; background: #202a37; }
+      .break-track span { display: block; height: 100%; }
+      .model-history { display: grid; gap: 7px; align-content: start; }
+      .history-line { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 9px; }
+      .history-line b { margin-left: auto; color: var(--text); font: 9px ui-monospace, monospace; }
+
+      /* Variant C: timeline */
+      .timeline-layout { display: grid; grid-template-columns: minmax(620px, 1.42fr) minmax(300px, .58fr); gap: 13px; }
+      .timeline-graph { padding: 14px; }
+      .svg-wrap { width: 100%; overflow-x: auto; }
+      .usage-svg { width: 100%; min-width: 620px; height: 260px; display: block; }
+      .gridline { stroke: #263242; stroke-width: 1; }
+      .axis-copy { fill: #8190a1; font: 9px ui-monospace, monospace; }
+      .line-sol { fill: none; stroke: var(--green); stroke-width: 3; }
+      .line-terra { fill: none; stroke: var(--blue); stroke-width: 3; }
+      .line-opus { fill: none; stroke: var(--violet); stroke-width: 3; }
+      .line-deep { fill: none; stroke: var(--amber); stroke-width: 3; }
+      .agent-picker { width: 100%; padding: 10px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); outline: none; }
+      .pulse-detail { padding: 14px; }
+      .pulse-total { margin: 13px 0; }
+      .pulse-total b { display: block; font-size: 29px; letter-spacing: -.04em; }
+      .pulse-total span { color: var(--muted); font-size: 9px; }
+      .spark-bars { display: flex; align-items: end; gap: 6px; height: 110px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #0d131b; }
+      .spark { flex: 1; min-width: 7px; border-radius: 3px 3px 1px 1px; background: var(--blue); opacity: .9; }
+      .pulse-list { display: grid; gap: 7px; margin-top: 12px; }
+      .pulse-line { display: flex; gap: 8px; color: var(--muted); font-size: 9px; }
+      .pulse-line span:first-child { width: 45px; font-family: ui-monospace, monospace; }
+      .pulse-line b { margin-left: auto; color: var(--text); font: 9px ui-monospace, monospace; }
+      .model-key { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; color: var(--muted); font-size: 9px; }
+
+      .switcher { position: fixed; left: 50%; bottom: 19px; z-index: 20; transform: translateX(-50%); display: grid; grid-template-columns: 38px minmax(235px, auto) 38px; align-items: center; padding: 6px; border: 1px solid #65758a; border-radius: 999px; background: #edf3f8; color: #10161e; box-shadow: 0 18px 55px rgb(0 0 0 / 40%); }
+      .switcher button { width: 34px; height: 34px; border: 0; border-radius: 50%; background: #dbe4ed; color: #18212c; font-size: 17px; }
+      .switch-copy { padding: 0 14px; text-align: center; }
+      .switch-copy strong { display: block; font-size: 10px; }
+      .switch-copy span { display: block; margin-top: 2px; color: #566477; font-size: 8px; }
+
+      @media (max-width: 960px) {
+        .shell { grid-template-columns: 1fr; }
+        .rail { display: none; }
+        main { padding: 18px 15px 108px; }
+        .heading { display: block; }
+        .state { margin: 11px 0 0; max-width: none; }
+        .summary { grid-template-columns: repeat(2, 1fr); }
+        .model-row { grid-template-columns: 150px minmax(160px, 1fr) 85px; }
+        .bars-grid, .ledger-layout, .timeline-layout { grid-template-columns: 1fr; }
+        .ledger-scroll { overflow-x: auto; }
+      }
+      @media (max-width: 600px) {
+        .topbar { padding: 9px 13px; }
+        .topbar > span:not(.online):not(.grow), .prototype-mark { display: none; }
+        .model-row { grid-template-columns: 1fr 70px; }
+        .model-row .stack { grid-column: 1 / -1; grid-row: 2; }
+        .bars-grid { display: block; }
+        .bars-grid > .panel + .panel { margin-top: 12px; }
+        .turn-chart { gap: 6px; height: 190px; }
+        .turn-model { display: none; }
+        .context-row { grid-template-columns: 105px 1fr 45px; }
+        .ledger-detail.open { grid-template-columns: 1fr; }
+        .switcher { bottom: 11px; grid-template-columns: 36px minmax(210px, auto) 36px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      const modelMeta = {
+        sol: { label: "gpt-5.6-sol", provider: "Codex", color: "#58d18e" },
+        terra: { label: "gpt-5.6-terra", provider: "Codex", color: "#79a8ff" },
+        opus: { label: "claude-opus-4.7", provider: "Claude", color: "#b491ff" },
+        deep: { label: "deepseek-v4-flash", provider: "OpenCode", color: "#efb95d" }
+      };
+
+      const agents = [
+        { id: "boss", name: "Boss coordinator", initials: "BO", parent: null, status: "working", role: "Issue loop", turns: [
+          { at: "09:48", model: "sol", input: 8500, cached: 5100, output: 1500, cost: .21, context: 17 },
+          { at: "10:02", model: "sol", input: 11200, cached: 7800, output: 2100, cost: .27, context: 29 },
+          { at: "10:21", model: "sol", input: 13300, cached: 9200, output: 2900, cost: .34, context: 44 },
+          { at: "10:42", model: "sol", input: 11200, cached: 6500, output: 3200, cost: .36, context: 58 }
+        ]},
+        { id: "writer", name: "Issue #17 writer", initials: "WR", parent: "boss", status: "working", role: "Implementation", turns: [
+          { at: "09:55", model: "terra", input: 9200, cached: 3100, output: 2400, cost: .08, context: 21 },
+          { at: "10:12", model: "terra", input: 15100, cached: 7600, output: 3900, cost: .13, context: 39 },
+          { at: "10:30", model: "sol", input: 17800, cached: 10800, output: 4100, cost: .39, context: 63 },
+          { at: "10:44", model: "sol", input: 7600, cached: 4500, output: 0, cost: .09, context: 71, live: true }
+        ]},
+        { id: "review-a", name: "Standards reviewer", initials: "RA", parent: "boss", status: "done", role: "Read-only review", turns: [
+          { at: "10:18", model: "opus", input: 18500, cached: 12100, output: 2100, cost: .42, context: 31 },
+          { at: "10:34", model: "opus", input: 22600, cached: 16800, output: 3100, cost: .55, context: 48 }
+        ]},
+        { id: "review-b", name: "Spec reviewer", initials: "RB", parent: "boss", status: "waiting", role: "Read-only review", turns: [
+          { at: "10:16", model: "sol", input: 14900, cached: 8700, output: 1700, cost: .31, context: 28 },
+          { at: "10:36", model: "sol", input: 7200, cached: 5100, output: 400, cost: .11, context: 35 }
+        ]},
+        { id: "research", name: "Provider research", initials: "RS", parent: "writer", status: "done", role: "Discovery", turns: [
+          { at: "10:08", model: "deep", input: 6800, cached: 0, output: 1500, cost: .03, context: 18 },
+          { at: "10:29", model: "deep", input: 10400, cached: 2100, output: 2400, cost: .05, context: 32 }
+        ]},
+        { id: "qa", name: "Cross-platform QA", initials: "QA", parent: "boss", status: "failed", role: "Verification", turns: [
+          { at: "10:11", model: "terra", input: 7300, cached: 2500, output: 900, cost: .04, context: 16 },
+          { at: "10:20", model: "terra", input: 9800, cached: 4100, output: 800, cost: .05, context: 25 }
+        ]}
+      ];
+
+      const variants = [
+        { id: "bars", key: "A", label: "Model bars", subtitle: "Usage overview + selected-agent turns" },
+        { id: "table", key: "B", label: "Usage ledger", subtitle: "Rank and expand every agent" },
+        { id: "timeline", key: "C", label: "Token timeline", subtitle: "When usage accumulated" }
+      ];
+      let state = { variant: getVariant(), agent: "writer", expanded: "writer", countLive: false };
+
+      function getVariant() {
+        const value = new URLSearchParams(location.search).get("variant");
+        return variants?.some?.((item) => item.id === value) ? value : (value === "table" || value === "timeline" ? value : "bars");
+      }
+      function turns(agent, includeLive = state.countLive) { return agent.turns.filter((turn) => includeLive || !turn.live); }
+      function sum(list, key) { return list.reduce((total, item) => total + (item[key] || 0), 0); }
+      function usageForTurns(list) {
+        const input = sum(list, "input");
+        const cached = sum(list, "cached");
+        const output = sum(list, "output");
+        return { input, cached, fresh: Math.max(0, input - cached), output, total: input + output, cost: sum(list, "cost") };
+      }
+      function usageForAgent(agent) { return usageForTurns(turns(agent)); }
+      function allFinalTurns() { return agents.flatMap((agent) => turns(agent, false)); }
+      function usageByModel() {
+        return Object.keys(modelMeta).map((model) => ({ model, ...usageForTurns(allFinalTurns().filter((turn) => turn.model === model)) })).filter((row) => row.total > 0).sort((a, b) => b.total - a.total);
+      }
+      function formatTokens(value) { return value >= 1000 ? `${(value / 1000).toFixed(value >= 100000 ? 0 : 1)}k` : String(value); }
+      function formatCost(value) { return `$${value.toFixed(2)}`; }
+      function percent(value, total) { return total ? Math.max(0, value / total * 100) : 0; }
+      function escapeHtml(value) { return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }
+      function modelChip(model) { const meta = modelMeta[model]; return `<span class="model-chip"><i class="model-dot" style="background:${meta.color}"></i>${meta.label}</span>`; }
+      function statusText(status) { return status === "done" ? "finished" : status; }
+
+      function frame(content) {
+        const current = variants.find((item) => item.id === state.variant);
+        return `<div class="shell">
+          <nav class="rail"><div class="brand">P</div><button class="rail-icon">⌂</button><button class="rail-icon active">◉</button><button class="rail-icon">▣</button><button class="rail-icon">⌘</button><span class="rail-grow"></span><button class="rail-icon">⚙</button></nav>
+          <div><header class="topbar"><i class="online"></i><strong>Local daemon</strong><span>Windows · connected</span><i class="grow"></i><span class="prototype-mark">THROWAWAY PROTOTYPE</span></header>${content}</div>
+        </div>
+        <nav class="switcher" aria-label="Prototype variants"><button id="previous">←</button><div class="switch-copy"><strong>${current.key} — ${current.label}</strong><span>${current.subtitle} · use arrow keys</span></div><button id="next">→</button></nav>`;
+      }
+
+      function commonHeading(extraState) {
+        const workspaceUsage = usageForTurns(allFinalTurns());
+        const active = agents.filter((agent) => agent.status === "working").length;
+        return `<section class="heading"><div><span class="eyebrow">Agent Observatory · token usage</span><h1>Emerald City</h1><p class="subtle">main · 6 agents · usage finalized by turn and attributed to its active model</p></div><div class="state">scope=workspace · variant=${state.variant} · ${extraState} · live-turn=${state.countLive ? "included" : "excluded"}</div></section>
+          <section class="summary">
+            <div class="summary-card"><b>${formatTokens(workspaceUsage.total)}</b><span>Recorded tokens</span><em>input + output · no cache double-count</em></div>
+            <div class="summary-card"><b>${formatTokens(workspaceUsage.cached)}</b><span>Cached input</span><em>${Math.round(percent(workspaceUsage.cached, workspaceUsage.input))}% of input</em></div>
+            <div class="summary-card"><b>${formatCost(workspaceUsage.cost)}</b><span>Reported cost</span><em>missing provider costs stay unknown</em></div>
+            <div class="summary-card"><b>${active}</b><span>Working agents</span><em>${allFinalTurns().length} finalized turns</em></div>
+          </section>`;
+      }
+
+      function stackHtml(usage, max) {
+        return `<div class="stack" aria-label="Fresh input ${usage.fresh}, cached input ${usage.cached}, output ${usage.output}" style="width:${Math.max(8, percent(usage.total, max))}%"><span class="fresh" style="width:${percent(usage.fresh, usage.total)}%"></span><span class="cached" style="width:${percent(usage.cached, usage.total)}%"></span><span class="output" style="width:${percent(usage.output, usage.total)}%"></span></div>`;
+      }
+
+      function modelBarsPanel() {
+        const rows = usageByModel();
+        const max = Math.max(...rows.map((row) => row.total));
+        return `<section class="panel"><header class="panel-head"><h2>Workspace usage by model</h2><span>finalized turns</span><div class="legend push"><span><i class="fresh"></i>fresh input</span><span><i class="cached"></i>cached input</span><span><i class="output"></i>output</span></div></header><div class="model-bars">${rows.map((row) => `<div class="model-row"><span class="model-name"><strong>${modelMeta[row.model].label}</strong><span>${modelMeta[row.model].provider} · ${formatCost(row.cost)}</span></span>${stackHtml(row, max)}<span class="bar-number">${formatTokens(row.total)}</span></div>`).join("")}</div></section>`;
+      }
+
+      function renderBars() {
+        const selected = agents.find((agent) => agent.id === state.agent) || agents[0];
+        const usage = usageForAgent(selected);
+        const selectedTurns = turns(selected);
+        const maxTurn = Math.max(...selectedTurns.map((turn) => turn.input + turn.output));
+        const agentRows = agents.map((agent) => {
+          const agentUsage = usageForAgent(agent);
+          const depth = agent.parent === "writer" ? "grandchild" : agent.parent ? "child" : "";
+          const models = [...new Set(turns(agent, true).map((turn) => turn.model))];
+          return `<button class="agent-row ${depth} ${state.agent === agent.id ? "selected" : ""}" data-agent="${agent.id}"><span class="avatar">${agent.initials}</span><span><strong>${escapeHtml(agent.name)}</strong><small>${models.map((model) => modelMeta[model].label).join(" → ")}</small></span><span class="agent-total">${formatTokens(agentUsage.total)}<small class="status-line">${statusText(agent.status)}</small></span></button>`;
+        }).join("");
+        const columns = selectedTurns.map((turn, index) => {
+          const turnUsage = usageForTurns([turn]);
+          const height = Math.max(7, percent(turnUsage.total, maxTurn));
+          return `<div class="turn-column"><span class="turn-model">${modelMeta[turn.model].label}</span><div class="turn-stack" style="height:${height}%"><span class="fresh" style="height:${percent(turnUsage.fresh, turnUsage.total)}%"></span><span class="cached" style="height:${percent(turnUsage.cached, turnUsage.total)}%"></span><span class="output" style="height:${percent(turnUsage.output, turnUsage.total)}%"></span></div><span class="turn-label">T${index + 1}<br>${formatTokens(turnUsage.total)}</span></div>`;
+        }).join("");
+        const latest = selected.turns[selected.turns.length - 1];
+        return frame(`<main>${commonHeading(`agent=${selected.id}`)}${modelBarsPanel()}<section class="bars-grid"><div class="panel"><header class="panel-head"><h2>Delegation tree</h2><span>select an agent</span></header><div class="agent-tree">${agentRows}</div></div><div class="panel"><header class="panel-head"><h2>Agent usage pulldown</h2><span>one stacked column per turn</span><div class="legend push"><span><i class="fresh"></i>fresh</span><span><i class="cached"></i>cached</span><span><i class="output"></i>output</span></div></header><div class="selected-agent"><div class="agent-title"><span class="avatar">${selected.initials}</span><div><h3>${escapeHtml(selected.name)}</h3><p>${selected.role} · ${[...new Set(selected.turns.map((turn) => modelMeta[turn.model].label))].join(" → ")}</p></div><div class="agent-cost"><b>${formatTokens(usage.total)}</b><span>${formatCost(usage.cost)} reported</span></div></div><div class="turn-chart">${columns}</div><div class="context-row"><span>Current context · not cumulative</span><div class="context-track"><span style="width:${latest.context}%"></span></div><b>${latest.context}%</b></div>${selected.turns.some((turn) => turn.live) ? `<div class="notice" style="margin-top:11px">The striped/live turn is excluded from recorded totals until a final usage event arrives. <button class="pill-live" id="toggle-live">${state.countLive ? "Exclude" : "Preview"} live sample</button></div>` : ""}</div></div></section></main>`);
+      }
+
+      function renderTable() {
+        const modelRows = usageByModel();
+        const maxModel = Math.max(...modelRows.map((row) => row.total));
+        const sorted = [...agents].sort((a, b) => usageForAgent(b).total - usageForAgent(a).total);
+        const rows = sorted.map((agent) => {
+          const usage = usageForAgent(agent);
+          const last = agent.turns[agent.turns.length - 1];
+          const models = [...new Set(agent.turns.map((turn) => turn.model))];
+          const open = state.expanded === agent.id;
+          const maxPart = Math.max(usage.fresh, usage.cached, usage.output);
+          return `<div><button class="ledger-row ${open ? "open" : ""}" data-expand="${agent.id}"><span class="agent-cell"><span class="avatar">${agent.initials}</span><span><strong>${escapeHtml(agent.name)}</strong><small>${agent.role} · ${statusText(agent.status)}</small></span></span><span>${modelChip(last.model)}${models.length > 1 ? `<small class="delta-up"> · switched</small>` : ""}</span><span class="mono">${formatTokens(usage.total)}</span><span class="mono">${Math.round(percent(usage.cached, usage.input))}%</span><span class="mono">${formatCost(usage.cost)}</span><span>›</span></button><div class="ledger-detail ${open ? "open" : ""}"><div class="breakdown"><div class="break-row"><span>Fresh input</span><div class="break-track"><span class="fresh" style="width:${percent(usage.fresh, maxPart)}%"></span></div><b>${formatTokens(usage.fresh)}</b></div><div class="break-row"><span>Cached input</span><div class="break-track"><span class="cached" style="width:${percent(usage.cached, maxPart)}%"></span></div><b>${formatTokens(usage.cached)}</b></div><div class="break-row"><span>Output</span><div class="break-track"><span class="output" style="width:${percent(usage.output, maxPart)}%"></span></div><b>${formatTokens(usage.output)}</b></div><div class="context-row"><span>Current context</span><div class="context-track"><span style="width:${last.context}%"></span></div><b>${last.context}%</b></div></div><div class="model-history"><div class="notice">Usage is finalized per turn. Repeated usage-updated samples must replace, not accumulate, within the same turn.</div>${agent.turns.map((turn) => `<div class="history-line"><span>${turn.at}</span>${modelChip(turn.model)}<b>${formatTokens(turn.input + turn.output)}${turn.live ? " live" : ""}</b></div>`).join("")}</div></div></div>`;
+        }).join("");
+        return frame(`<main>${commonHeading(`expanded=${state.expanded}`)}<section class="ledger-layout"><aside class="panel"><header class="panel-head"><h2>Models</h2><span>ranked by recorded tokens</span></header><div class="model-rank">${modelRows.map((row) => `<article class="rank-card"><div class="rank-top"><i class="model-dot" style="background:${modelMeta[row.model].color}"></i><strong>${modelMeta[row.model].label}</strong><b>${formatTokens(row.total)}</b></div><div class="thin-bar"><span style="width:${percent(row.total, maxModel)}%;background:${modelMeta[row.model].color}"></span></div></article>`).join("")}<div class="notice">Totals are provider-reported. Unknown costs or missing usage stay visibly unknown rather than estimated.</div></div></aside><section class="panel ledger-scroll"><header class="panel-head"><h2>Agent usage ledger</h2><span>ranked high to low · select a row</span></header><div class="ledger"><div class="ledger-head"><span>Agent</span><span>Current model</span><span>Tokens</span><span>Cache share</span><span>Cost</span><span></span></div>${rows}</div></section></section></main>`);
+      }
+
+      function cumulativeModelSeries() {
+        const ordered = [...allFinalTurns()].sort((a, b) => a.at.localeCompare(b.at));
+        const totals = Object.fromEntries(Object.keys(modelMeta).map((model) => [model, 0]));
+        return ordered.map((turn) => { totals[turn.model] += turn.input + turn.output; return { at: turn.at, totals: { ...totals } }; });
+      }
+      function svgPolyline(series, model, max) {
+        const width = 680, left = 45, right = 15, top = 18, bottom = 34;
+        const usableW = width - left - right, usableH = 260 - top - bottom;
+        return series.map((point, index) => `${left + index * usableW / Math.max(1, series.length - 1)},${top + usableH - point.totals[model] / max * usableH}`).join(" ");
+      }
+      function renderTimeline() {
+        const series = cumulativeModelSeries();
+        const max = Math.max(...series.flatMap((point) => Object.values(point.totals)));
+        const selected = agents.find((agent) => agent.id === state.agent) || agents[0];
+        const usage = usageForAgent(selected);
+        const maxTurn = Math.max(...turns(selected).map((turn) => turn.input + turn.output));
+        const yLines = [0, .25, .5, .75, 1].map((fraction) => `<line class="gridline" x1="45" x2="665" y1="${226 - 208 * fraction}" y2="${226 - 208 * fraction}"/><text class="axis-copy" x="4" y="${230 - 208 * fraction}">${formatTokens(max * fraction)}</text>`).join("");
+        const xLabels = series.filter((_, index) => index % 3 === 0 || index === series.length - 1).map((point, _, visible) => { const index = series.indexOf(point); return `<text class="axis-copy" x="${45 + index * 620 / Math.max(1, series.length - 1)}" y="248" text-anchor="middle">${point.at}</text>`; }).join("");
+        const polylines = Object.keys(modelMeta).map((model) => `<polyline class="line-${model}" points="${svgPolyline(series, model, max)}"/>`).join("");
+        const spark = turns(selected).map((turn) => `<span class="spark" style="height:${Math.max(8, percent(turn.input + turn.output, maxTurn))}%;background:${modelMeta[turn.model].color}" title="${turn.at} · ${formatTokens(turn.input + turn.output)}"></span>`).join("");
+        const options = agents.map((agent) => `<option value="${agent.id}" ${agent.id === selected.id ? "selected" : ""}>${escapeHtml(agent.name)}</option>`).join("");
+        return frame(`<main>${commonHeading(`agent=${selected.id}`)}<section class="timeline-layout"><div class="panel"><header class="panel-head"><h2>Cumulative recorded tokens</h2><span>workspace turns over time</span><div class="legend push">${Object.entries(modelMeta).map(([id, meta]) => `<span><i style="background:${meta.color}"></i>${meta.label}</span>`).join("")}</div></header><div class="timeline-graph"><div class="svg-wrap"><svg class="usage-svg" viewBox="0 0 680 260" role="img" aria-label="Cumulative token usage over time by model">${yLines}${xLabels}${polylines}</svg></div><div class="notice">Each line grows only when a turn finalizes for that model. Model switches therefore move future usage to a different line.</div></div></div><aside class="panel"><header class="panel-head"><h2>Agent pulldown</h2><span>turn pulse</span></header><div class="pulse-detail"><select class="agent-picker" id="agent-picker">${options}</select><div class="pulse-total"><b>${formatTokens(usage.total)}</b><span>${formatCost(usage.cost)} · ${formatTokens(usage.cached)} cached input</span></div><div class="spark-bars">${spark}</div><div class="model-key">${[...new Set(selected.turns.map((turn) => turn.model))].map((model) => `<span>${modelChip(model)}</span>`).join("")}</div><div class="pulse-list">${turns(selected).map((turn) => `<div class="pulse-line"><span>${turn.at}</span><span>${formatTokens(turn.input)} in · ${formatTokens(turn.output)} out</span><b>${formatTokens(turn.input + turn.output)}</b></div>`).join("")}</div></div></aside></section></main>`);
+      }
+
+      function render() {
+        const content = state.variant === "table" ? renderTable() : state.variant === "timeline" ? renderTimeline() : renderBars();
+        document.getElementById("app").innerHTML = content;
+        bind();
+      }
+      function switchVariant(direction) {
+        const index = variants.findIndex((item) => item.id === state.variant);
+        state.variant = variants[(index + direction + variants.length) % variants.length].id;
+        const params = new URLSearchParams(location.search); params.set("variant", state.variant);
+        history.replaceState({}, "", `${location.pathname}?${params}`); render();
+      }
+      function bind() {
+        document.getElementById("previous").onclick = () => switchVariant(-1);
+        document.getElementById("next").onclick = () => switchVariant(1);
+        document.querySelectorAll("[data-agent]").forEach((button) => button.onclick = () => { state.agent = button.dataset.agent; render(); });
+        document.querySelectorAll("[data-expand]").forEach((button) => button.onclick = () => { state.expanded = state.expanded === button.dataset.expand ? "none" : button.dataset.expand; render(); });
+        const picker = document.getElementById("agent-picker"); if (picker) picker.onchange = () => { state.agent = picker.value; render(); };
+        const toggle = document.getElementById("toggle-live"); if (toggle) toggle.onclick = () => { state.countLive = !state.countLive; render(); };
+      }
+      addEventListener("keydown", (event) => { const target = document.activeElement; if (["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName) || target?.isContentEditable) return; if (event.key === "ArrowLeft") switchVariant(-1); if (event.key === "ArrowRight") switchVariant(1); });
+      addEventListener("popstate", () => { state.variant = getVariant(); render(); });
+      render();
+    </script>
+  </body>
+</html>

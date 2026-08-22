@@ -1,0 +1,457 @@
+<!doctype html>
+<!--
+  THROWAWAY PROTOTYPE — not production plugin code.
+  Two scope variants of Agent Observatory, switchable via ?variant=single|all.
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Observatory scope prototype</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #090d12;
+        --panel: #10161e;
+        --panel-2: #151d27;
+        --line: #263141;
+        --text: #eef3f8;
+        --muted: #8d9aaa;
+        --green: #54d18b;
+        --blue: #71a7ff;
+        --amber: #f3bd63;
+        --red: #ff737b;
+        --violet: #ac8cff;
+        --shadow: 0 18px 55px rgb(0 0 0 / 35%);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--bg); color: var(--text); }
+      button, input { font: inherit; }
+      button { color: inherit; }
+
+      .app-shell { min-height: 100vh; display: grid; grid-template-columns: 68px 1fr; }
+      .rail {
+        position: sticky; top: 0; height: 100vh; z-index: 3;
+        display: flex; flex-direction: column; align-items: center; gap: 12px;
+        padding: 18px 10px; border-right: 1px solid var(--line); background: #0c1118;
+      }
+      .brand {
+        display: grid; place-items: center; width: 38px; height: 38px; margin-bottom: 10px;
+        border-radius: 12px; color: #07110c; background: var(--green); font-weight: 900;
+      }
+      .rail-button {
+        width: 42px; height: 42px; border: 0; border-radius: 11px;
+        background: transparent; color: var(--muted); cursor: default; font-size: 17px;
+      }
+      .rail-button.active { color: var(--text); background: var(--panel-2); outline: 1px solid var(--line); }
+      .rail-spacer { flex: 1; }
+
+      .chrome { min-width: 0; }
+      .topbar {
+        min-height: 58px; display: flex; align-items: center; gap: 12px; padding: 10px 22px;
+        border-bottom: 1px solid var(--line); background: rgb(12 17 24 / 90%); backdrop-filter: blur(14px);
+      }
+      .host-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px rgb(84 209 139 / 12%); }
+      .topbar strong { font-size: 13px; }
+      .topbar .muted { font-size: 12px; }
+      .topbar-spacer { flex: 1; }
+      .proto-tag { padding: 5px 9px; border: 1px dashed #59677a; border-radius: 8px; color: #b6c0cc; font: 700 10px/1.2 ui-monospace, monospace; letter-spacing: .08em; }
+
+      main { padding: 24px 26px 110px; }
+      .page-heading { display: flex; align-items: flex-start; gap: 18px; margin-bottom: 20px; }
+      .page-heading h1 { margin: 3px 0 6px; font-size: clamp(24px, 3vw, 34px); letter-spacing: -.035em; }
+      .page-heading p { margin: 0; color: var(--muted); font-size: 14px; }
+      .eyebrow { color: var(--green); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+      .state-readout {
+        margin-left: auto; max-width: 420px; padding: 8px 11px; border: 1px solid var(--line);
+        border-radius: 9px; background: var(--panel); color: #aab7c6; font: 11px/1.4 ui-monospace, monospace;
+      }
+
+      .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-bottom: 15px; }
+      .search {
+        min-width: 230px; flex: 1; padding: 10px 12px; color: var(--text);
+        background: var(--panel); border: 1px solid var(--line); border-radius: 10px; outline: none;
+      }
+      .search:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgb(113 167 255 / 12%); }
+      .pill {
+        padding: 8px 11px; border-radius: 999px; border: 1px solid var(--line);
+        background: var(--panel); color: var(--muted); font-size: 12px; cursor: pointer;
+      }
+      .pill.active { color: var(--text); border-color: #52627a; background: #1b2634; }
+
+      .metric-strip { display: grid; grid-template-columns: repeat(5, minmax(100px, 1fr)); gap: 10px; margin-bottom: 16px; }
+      .metric { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+      .metric .value { display: block; margin-bottom: 3px; font-size: 23px; font-weight: 800; letter-spacing: -.03em; }
+      .metric .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+
+      .panel { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); overflow: hidden; }
+      .panel-header { min-height: 50px; display: flex; align-items: center; gap: 10px; padding: 12px 15px; border-bottom: 1px solid var(--line); }
+      .panel-header h2 { margin: 0; font-size: 13px; }
+      .panel-header span { color: var(--muted); font-size: 11px; }
+      .panel-header .right { margin-left: auto; }
+
+      /* Variant: one workspace */
+      .single-grid { display: grid; grid-template-columns: minmax(330px, 0.8fr) minmax(430px, 1.35fr); gap: 14px; min-height: 610px; }
+      .agent-list { padding: 7px; }
+      .agent-row {
+        width: 100%; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 9px;
+        padding: 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; text-align: left; cursor: pointer;
+      }
+      .agent-row:hover { background: var(--panel-2); }
+      .agent-row.selected { background: #182332; border-color: #34455d; }
+      .agent-row.child { padding-left: 32px; }
+      .agent-row.grandchild { padding-left: 55px; }
+      .avatar { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 7px; background: #283445; color: #dfe8f4; font-size: 10px; font-weight: 800; }
+      .agent-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; }
+      .agent-meta { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+      .status { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+      .dot { width: 7px; height: 7px; border-radius: 50%; background: #687588; }
+      .working .dot { background: var(--green); box-shadow: 0 0 0 3px rgb(84 209 139 / 10%); }
+      .waiting .dot { background: var(--amber); }
+      .done .dot { background: var(--blue); }
+      .failed .dot { background: var(--red); }
+
+      .agent-detail { padding: 16px; }
+      .detail-title { display: flex; align-items: center; gap: 12px; margin-bottom: 17px; }
+      .detail-title .avatar { width: 38px; height: 38px; border-radius: 10px; }
+      .detail-title h3 { margin: 0 0 4px; font-size: 17px; }
+      .detail-title p { margin: 0; color: var(--muted); font-size: 11px; }
+      .attention-note { margin-left: auto; padding: 7px 9px; border-radius: 8px; background: rgb(243 189 99 / 10%); color: var(--amber); font-size: 10px; }
+      .timeline { position: relative; display: grid; gap: 3px; padding-left: 19px; }
+      .timeline::before { content: ""; position: absolute; left: 5px; top: 8px; bottom: 12px; width: 1px; background: var(--line); }
+      .event { position: relative; display: grid; grid-template-columns: 72px 86px 1fr; gap: 10px; padding: 9px 6px; border-radius: 8px; }
+      .event:hover { background: var(--panel-2); }
+      .event::before { content: ""; position: absolute; left: -18px; top: 15px; width: 7px; height: 7px; border: 2px solid var(--panel); border-radius: 50%; background: var(--blue); }
+      .event .time { color: #7d8a9a; font: 10px ui-monospace, monospace; }
+      .event .kind { color: #a9b6c5; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+      .event .copy { color: #dce4ed; font-size: 11px; line-height: 1.45; }
+      .event.tool::before { background: var(--violet); }
+      .event.wait::before { background: var(--amber); }
+      .event.error::before { background: var(--red); }
+
+      /* Variant: all workspaces */
+      .all-grid { display: grid; grid-template-columns: minmax(250px, .58fr) minmax(570px, 1.55fr); gap: 14px; }
+      .attention-list { padding: 8px; display: grid; gap: 7px; align-content: start; }
+      .attention-item { padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
+      .attention-item strong { display: block; margin-bottom: 4px; font-size: 11px; }
+      .attention-item p { margin: 0 0 8px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+      .reason { color: var(--amber); font: 9px ui-monospace, monospace; }
+      .workspace-table { min-width: 680px; }
+      .table-head, .workspace-row {
+        display: grid; grid-template-columns: minmax(180px, 1.1fr) minmax(160px, .8fr) 160px 105px 24px;
+        align-items: center; gap: 13px; padding: 11px 14px;
+      }
+      .table-head { border-bottom: 1px solid var(--line); color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .09em; }
+      .workspace-row { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; cursor: pointer; }
+      .workspace-row:hover, .workspace-row.expanded { background: var(--panel-2); }
+      .workspace-name { min-width: 0; }
+      .workspace-name strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+      .workspace-name span { color: var(--muted); font: 9px ui-monospace, monospace; }
+      .mini-stack { display: flex; gap: 3px; }
+      .mini-bar { height: 8px; min-width: 9px; flex: 1; max-width: 35px; border-radius: 2px; background: #536073; }
+      .mini-bar.working { background: var(--green); }
+      .mini-bar.waiting { background: var(--amber); }
+      .mini-bar.done { background: var(--blue); }
+      .mini-bar.failed { background: var(--red); }
+      .activity-copy { color: #c6d0dc; font-size: 10px; }
+      .age { color: var(--muted); font: 10px ui-monospace, monospace; }
+      .chevron { color: var(--muted); transition: transform .15s ease; }
+      .workspace-row.expanded .chevron { transform: rotate(90deg); }
+      .workspace-detail { display: none; padding: 13px 16px 16px; border-bottom: 1px solid var(--line); background: #0d131b; }
+      .workspace-detail.open { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .lane { padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+      .lane-top { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; font-size: 10px; font-weight: 700; }
+      .lane p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.4; }
+
+      .empty { padding: 30px; color: var(--muted); text-align: center; font-size: 12px; }
+
+      .switcher {
+        position: fixed; left: 50%; bottom: 20px; z-index: 20; transform: translateX(-50%);
+        display: grid; grid-template-columns: 40px minmax(220px, auto) 40px; align-items: center;
+        padding: 6px; border: 1px solid #65748a; border-radius: 999px; background: #edf3f8; color: #10161e; box-shadow: var(--shadow);
+      }
+      .switcher button { width: 36px; height: 34px; border: 0; border-radius: 50%; background: #dbe4ed; cursor: pointer; font-size: 18px; }
+      .switch-label { padding: 0 16px; text-align: center; }
+      .switch-label strong { display: block; font-size: 11px; }
+      .switch-label span { display: block; margin-top: 2px; color: #516072; font-size: 9px; }
+
+      @media (max-width: 920px) {
+        .app-shell { grid-template-columns: 1fr; }
+        .rail { display: none; }
+        main { padding: 18px 15px 110px; }
+        .page-heading { display: block; }
+        .state-readout { margin: 12px 0 0; max-width: none; }
+        .metric-strip { grid-template-columns: repeat(3, 1fr); }
+        .single-grid, .all-grid { grid-template-columns: 1fr; }
+        .single-grid { min-height: auto; }
+        .workspace-panel-scroll { overflow-x: auto; }
+      }
+
+      @media (max-width: 580px) {
+        .topbar { padding: 9px 13px; }
+        .topbar .muted, .proto-tag { display: none; }
+        .metric-strip { grid-template-columns: repeat(2, 1fr); }
+        .event { grid-template-columns: 54px 1fr; }
+        .event .kind { display: none; }
+        .workspace-detail.open { grid-template-columns: 1fr; }
+        .switcher { grid-template-columns: 38px minmax(190px, auto) 38px; bottom: 12px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      const workspaces = [
+        {
+          id: "emerald-city", name: "Emerald City", branch: "main", path: "C:/!projects/emerald-city", current: true,
+          agents: [
+            { id: "boss", initials: "BO", name: "Boss coordinator", role: "Issue loop", status: "working", parent: null, age: "18m", latest: "Verifying issue #17 handoff", hint: null },
+            { id: "writer", initials: "WR", name: "Issue #17 writer", role: "Implementation", status: "working", parent: "boss", age: "12m", latest: "Running focused PowerShell tests", hint: null },
+            { id: "review-a", initials: "RA", name: "Standards reviewer", role: "Read-only review", status: "done", parent: "boss", age: "8m", latest: "Approved with one advisory note", hint: null },
+            { id: "review-b", initials: "RB", name: "Spec reviewer", role: "Read-only review", status: "waiting", parent: "boss", age: "9m", latest: "Waiting for permission decision", hint: "Waiting 6m · permission requested" },
+            { id: "research", initials: "RS", name: "Provider research", role: "Discovery", status: "done", parent: "writer", age: "4m", latest: "Returned provider inventory", hint: null },
+            { id: "stale", initials: "QA", name: "Cross-platform QA", role: "Verification", status: "failed", parent: "boss", age: "21m", latest: "Bash runner exited 127", hint: "Failed · dependency unavailable" }
+          ]
+        },
+        {
+          id: "paseo-core", name: "Paseo Core", branch: "feature/plugin-panels", path: "C:/code/paseo", current: false,
+          agents: [
+            { id: "pc-1", initials: "UI", name: "Panel implementer", status: "working", latest: "Editing workspace panel registry" },
+            { id: "pc-2", initials: "TS", name: "Type reviewer", status: "done", latest: "Type contract approved" },
+            { id: "pc-3", initials: "MB", name: "Mobile reviewer", status: "waiting", latest: "Awaiting simulator" },
+            { id: "pc-4", initials: "DX", name: "Docs agent", status: "done", latest: "Updated plugin reference" }
+          ]
+        },
+        {
+          id: "widget-lab", name: "Widget Lab", branch: "issue-42-cache", path: "C:/code/widget-lab", current: false,
+          agents: [
+            { id: "wl-1", initials: "IM", name: "Cache implementer", status: "working", latest: "Profiling invalidation path" },
+            { id: "wl-2", initials: "RV", name: "Review agent", status: "failed", latest: "Test fixture missing" },
+            { id: "wl-3", initials: "DB", name: "Database investigator", status: "waiting", latest: "No activity for 28 minutes" }
+          ]
+        },
+        {
+          id: "docs-garden", name: "Docs Garden", branch: "main", path: "C:/writing/docs-garden", current: false,
+          agents: [
+            { id: "dg-1", initials: "ED", name: "Technical editor", status: "done", latest: "Style pass complete" },
+            { id: "dg-2", initials: "LK", name: "Link checker", status: "done", latest: "All links valid" }
+          ]
+        }
+      ];
+
+      const events = {
+        boss: [
+          ["10:42:18", "status", "Observed writer transition to verification", ""],
+          ["10:41:03", "tool", "Read clean-worktree and commit evidence", "tool"],
+          ["10:38:51", "message", "Requested exact output from focused PowerShell tests", ""],
+          ["10:35:22", "status", "Standards reviewer completed with approve", ""],
+          ["10:31:07", "tool", "Launched two independent review agents", "tool"],
+          ["10:28:44", "message", "Accepted implementation commit 81c92e7", ""]
+        ],
+        writer: [
+          ["10:42:02", "tool", "Invoke-Pester scripts/tests", "tool"],
+          ["10:39:20", "message", "Resolved malformed response parity failure", ""],
+          ["10:36:10", "tool", "Inspected bash and PowerShell fixtures", "tool"],
+          ["10:30:15", "status", "Implementation complete; verification started", ""]
+        ],
+        "review-a": [["10:35:22", "message", "Approve · one advisory documentation note", ""]],
+        "review-b": [
+          ["10:36:31", "wait", "Permission required to execute verification command", "wait"],
+          ["10:34:05", "tool", "Read fixed-point diff and issue specification", "tool"]
+        ],
+        research: [["10:33:40", "message", "Returned normalized inventory for Codex and OpenCode", ""]],
+        stale: [
+          ["10:20:11", "error", "bash: bats: command not found", "error"],
+          ["10:19:52", "tool", "Attempted cross-platform verification", "tool"]
+        ]
+      };
+
+      const variantMeta = {
+        single: { name: "Workspace focus", subtitle: "One selected workspace" },
+        all: { name: "Host portfolio", subtitle: "All workspaces" }
+      };
+      let state = { variant: getVariant(), agent: "boss", filter: "all", query: "", workspace: "emerald-city" };
+
+      function getVariant() {
+        const value = new URLSearchParams(location.search).get("variant");
+        return value === "all" ? "all" : "single";
+      }
+
+      function statusLabel(status) { return status[0].toUpperCase() + status.slice(1); }
+      function countStatus(agents, status) { return agents.filter((agent) => agent.status === status).length; }
+      function escapeHtml(value) {
+        return String(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
+      }
+
+      function shell(content) {
+        const meta = variantMeta[state.variant];
+        return `
+          <div class="app-shell">
+            <nav class="rail" aria-label="Paseo prototype navigation">
+              <div class="brand">P</div>
+              <button class="rail-button">⌂</button>
+              <button class="rail-button active" aria-label="Agent Observatory">◉</button>
+              <button class="rail-button">▣</button>
+              <button class="rail-button">⌘</button>
+              <div class="rail-spacer"></div>
+              <button class="rail-button">⚙</button>
+            </nav>
+            <div class="chrome">
+              <header class="topbar">
+                <span class="host-dot"></span><strong>Local daemon</strong><span class="muted">Windows · connected</span>
+                <span class="topbar-spacer"></span><span class="proto-tag">THROWAWAY PROTOTYPE</span>
+              </header>
+              ${content}
+            </div>
+          </div>
+          <div class="switcher" role="navigation" aria-label="Prototype variants">
+            <button id="previous-variant" aria-label="Previous variant">←</button>
+            <div class="switch-label"><strong>${state.variant === "single" ? "A" : "B"} — ${meta.name}</strong><span>${meta.subtitle} · use arrow keys</span></div>
+            <button id="next-variant" aria-label="Next variant">→</button>
+          </div>`;
+      }
+
+      function metric(value, label) { return `<div class="metric"><span class="value">${value}</span><span class="label">${label}</span></div>`; }
+      function status(status) { return `<span class="status ${status}"><span class="dot"></span>${statusLabel(status)}</span>`; }
+
+      function renderSingle() {
+        const workspace = workspaces[0];
+        const visible = workspace.agents.filter((agent) => {
+          const matchesFilter = state.filter === "all" || agent.status === state.filter;
+          const needle = state.query.toLowerCase();
+          return matchesFilter && (!needle || `${agent.name} ${agent.role} ${agent.latest}`.toLowerCase().includes(needle));
+        });
+        const selected = workspace.agents.find((agent) => agent.id === state.agent) || workspace.agents[0];
+        const selectedEvents = events[selected.id] || [];
+        const rows = visible.map((agent) => {
+          const depthClass = agent.parent === "writer" ? "grandchild" : agent.parent ? "child" : "";
+          return `<button class="agent-row ${depthClass} ${agent.id === selected.id ? "selected" : ""}" data-agent="${agent.id}">
+            <span class="avatar">${agent.initials}</span>
+            <span><span class="agent-name">${escapeHtml(agent.name)}</span><span class="agent-meta">${escapeHtml(agent.role)} · ${agent.age}</span></span>
+            ${status(agent.status)}
+          </button>`;
+        }).join("");
+        const timeline = selectedEvents.map(([time, kind, copy, className]) => `<div class="event ${className}"><span class="time">${time}</span><span class="kind">${kind}</span><span class="copy">${escapeHtml(copy)}</span></div>`).join("");
+
+        return shell(`<main>
+          <section class="page-heading">
+            <div><span class="eyebrow">Agent Observatory · Workspace</span><h1>${workspace.name}</h1><p>${workspace.branch} · ${workspace.path}</p></div>
+            <div class="state-readout">scope=workspace · workspace=${workspace.id} · agent=${selected.id} · filter=${state.filter} · query=${state.query || "∅"}</div>
+          </section>
+          <section class="metric-strip">
+            ${metric(workspace.agents.length, "Agents")}${metric(countStatus(workspace.agents, "working"), "Working")}${metric(countStatus(workspace.agents, "waiting"), "Waiting")}${metric(countStatus(workspace.agents, "done"), "Finished")}${metric(countStatus(workspace.agents, "failed"), "Failed")}
+          </section>
+          <div class="toolbar">
+            <input id="agent-search" class="search" value="${escapeHtml(state.query)}" placeholder="Search this workspace…" aria-label="Search agents" />
+            ${["all", "working", "waiting", "done", "failed"].map((filter) => `<button class="pill ${state.filter === filter ? "active" : ""}" data-filter="${filter}">${statusLabel(filter)}</button>`).join("")}
+          </div>
+          <section class="single-grid">
+            <div class="panel">
+              <header class="panel-header"><h2>Delegation tree</h2><span>${visible.length} shown</span><span class="right">parent → child</span></header>
+              <div class="agent-list">${rows || `<div class="empty">No agents match this view.</div>`}</div>
+            </div>
+            <div class="panel">
+              <header class="panel-header"><h2>Recent activity</h2><span>latest ${selectedEvents.length} observed events</span><span class="right">live</span></header>
+              <div class="agent-detail">
+                <div class="detail-title"><span class="avatar">${selected.initials}</span><div><h3>${escapeHtml(selected.name)}</h3><p>${escapeHtml(selected.latest)}</p></div>${selected.hint ? `<span class="attention-note">${escapeHtml(selected.hint)}</span>` : ""}</div>
+                <div class="timeline">${timeline || `<div class="empty">No recent supported events.</div>`}</div>
+              </div>
+            </div>
+          </section>
+        </main>`);
+      }
+
+      function workspaceSummary(workspace) {
+        const counts = ["working", "waiting", "done", "failed"].flatMap((kind) => Array(countStatus(workspace.agents, kind)).fill(kind));
+        return counts.map((kind) => `<span class="mini-bar ${kind}" title="${kind}"></span>`).join("");
+      }
+
+      function renderAll() {
+        const query = state.query.toLowerCase();
+        const visible = workspaces.filter((workspace) => !query || `${workspace.name} ${workspace.branch} ${workspace.path}`.toLowerCase().includes(query));
+        const allAgents = workspaces.flatMap((workspace) => workspace.agents);
+        const attention = [
+          { workspace: "Widget Lab", agent: "Database investigator", copy: "Working state has no observed activity for 28 minutes.", reason: "rule=inactivity · threshold=20m" },
+          { workspace: "Emerald City", agent: "Spec reviewer", copy: "Agent is waiting for a permission decision.", reason: "rule=waiting-for-input · age=6m" },
+          { workspace: "Widget Lab", agent: "Review agent", copy: "Turn finished with a failed test fixture.", reason: "rule=failed-outcome · age=11m" },
+          { workspace: "Emerald City", agent: "Cross-platform QA", copy: "Verification could not start because bats is unavailable.", reason: "rule=failed-outcome · age=21m" }
+        ];
+        const attentionHtml = attention.map((item) => `<article class="attention-item"><strong>${item.workspace} · ${item.agent}</strong><p>${item.copy}</p><span class="reason">${item.reason}</span></article>`).join("");
+        const workspaceRows = visible.map((workspace) => {
+          const expanded = state.workspace === workspace.id;
+          return `<div>
+            <button class="workspace-row ${expanded ? "expanded" : ""}" data-workspace="${workspace.id}">
+              <span class="workspace-name"><strong>${workspace.current ? "★ " : ""}${escapeHtml(workspace.name)}</strong><span>${escapeHtml(workspace.branch)}</span></span>
+              <span class="mini-stack">${workspaceSummary(workspace)}</span>
+              <span class="activity-copy">${escapeHtml(workspace.agents[0].latest)}</span>
+              <span class="age">${workspace.current ? "now" : workspace.id === "paseo-core" ? "2m ago" : workspace.id === "widget-lab" ? "11m ago" : "1h ago"}</span>
+              <span class="chevron">›</span>
+            </button>
+            <div class="workspace-detail ${expanded ? "open" : ""}">
+              ${workspace.agents.map((agent) => `<div class="lane"><div class="lane-top">${status(agent.status)} <span>${escapeHtml(agent.name)}</span></div><p>${escapeHtml(agent.latest)}</p></div>`).join("")}
+            </div>
+          </div>`;
+        }).join("");
+
+        return shell(`<main>
+          <section class="page-heading">
+            <div><span class="eyebrow">Agent Observatory · Host</span><h1>Workspace portfolio</h1><p>Local daemon · four active and recent workspaces</p></div>
+            <div class="state-readout">scope=host · workspaces=${visible.length}/${workspaces.length} · expanded=${state.workspace} · query=${state.query || "∅"}</div>
+          </section>
+          <section class="metric-strip">
+            ${metric(workspaces.length, "Workspaces")}${metric(allAgents.length, "Agents")}${metric(countStatus(allAgents, "working"), "Working")}${metric(countStatus(allAgents, "waiting"), "Waiting")}${metric(attention.length, "Attention")}
+          </section>
+          <div class="toolbar"><input id="workspace-search" class="search" value="${escapeHtml(state.query)}" placeholder="Search workspaces or branches…" aria-label="Search workspaces" /><button class="pill active">Active + recent</button><button class="pill">Current host</button></div>
+          <section class="all-grid">
+            <aside class="panel">
+              <header class="panel-header"><h2>Attention queue</h2><span>${attention.length} explainable hints</span></header>
+              <div class="attention-list">${attentionHtml}</div>
+            </aside>
+            <div class="panel workspace-panel-scroll">
+              <header class="panel-header"><h2>Workspaces</h2><span>select a row to inspect its agents</span><span class="right">sorted by activity</span></header>
+              <div class="workspace-table">
+                <div class="table-head"><span>Workspace</span><span>Agent states</span><span>Latest activity</span><span>Updated</span><span></span></div>
+                ${workspaceRows || `<div class="empty">No workspaces match this view.</div>`}
+              </div>
+            </div>
+          </section>
+        </main>`);
+      }
+
+      function render() {
+        document.getElementById("app").innerHTML = state.variant === "single" ? renderSingle() : renderAll();
+        bindEvents();
+      }
+
+      function switchVariant(next) {
+        state.variant = next;
+        state.query = "";
+        const params = new URLSearchParams(location.search);
+        params.set("variant", next);
+        history.replaceState({}, "", `${location.pathname}?${params.toString()}`);
+        render();
+      }
+
+      function bindEvents() {
+        document.getElementById("previous-variant").onclick = () => switchVariant(state.variant === "single" ? "all" : "single");
+        document.getElementById("next-variant").onclick = () => switchVariant(state.variant === "single" ? "all" : "single");
+        document.querySelectorAll("[data-agent]").forEach((button) => button.onclick = () => { state.agent = button.dataset.agent; render(); });
+        document.querySelectorAll("[data-filter]").forEach((button) => button.onclick = () => { state.filter = button.dataset.filter; render(); });
+        document.querySelectorAll("[data-workspace]").forEach((button) => button.onclick = () => { state.workspace = state.workspace === button.dataset.workspace ? "none" : button.dataset.workspace; render(); });
+        const search = document.getElementById(state.variant === "single" ? "agent-search" : "workspace-search");
+        if (search) search.oninput = (event) => { state.query = event.target.value; render(); const next = document.getElementById(event.target.id); next.focus(); next.setSelectionRange(state.query.length, state.query.length); };
+      }
+
+      addEventListener("popstate", () => { state.variant = getVariant(); render(); });
+      addEventListener("keydown", (event) => {
+        const tag = document.activeElement?.tagName;
+        if (["INPUT", "TEXTAREA"].includes(tag) || document.activeElement?.isContentEditable) return;
+        if (event.key === "ArrowLeft" || event.key === "ArrowRight") switchVariant(state.variant === "single" ? "all" : "single");
+      });
+      render();
+    </script>
+  </body>
+</html>
