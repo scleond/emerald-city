@@ -6,6 +6,17 @@ Archiving the opening workspace does not close the project view while another ac
 remains. Workspace and agent changes arrive through Paseo's host-supplied SDK connection; the
 plugin does not open another connection or run a web server.
 
+## Attention hints
+
+The panel includes a deterministic project attention queue. Each agent appears at most once with a
+single primary reason, ordered user input (pending permission or question), failure (terminal failed
+outcome), then inactivity (a fixed, non-configurable 15 minutes without meaningful progress). The
+queue sorts by that priority and then oldest hint first, labels every entry with its workspace, and
+selecting an entry focuses the agent for detailed inspection. Heartbeats reset inactivity only when
+they report progress or a status change, and observable long-running operations or active child
+dependencies pause the timer. Hints are factual triage signals derived purely from host snapshots;
+the derivation lives in `observation.ts` with deterministic tests.
+
 ## Develop
 
 ```sh

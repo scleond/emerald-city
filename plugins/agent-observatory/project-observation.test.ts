@@ -147,11 +147,67 @@ describe("ProjectObservationController", () => {
     );
     controller.stop();
   });
+
+  it("raises attention hints immediately for permission requests and clears them on resume", async () => {
+    const fixedNow = Date.parse("2026-08-22T12:00:00.000Z");
+    const iso = (value: number) => new Date(value).toISOString();
+    const harness = createPaseoHarness({
+      agents: [agent("agent-1", "running", { workspaceId: "workspace-1" })],
+    });
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers(), () => fixedNow);
+    await controller.start();
+    expect(controller.getSnapshot()).toMatchObject({ phase: "ready", attention: [] });
+
+    harness.publishAgent({
+      kind: "upsert",
+      agent: agent("agent-1", "running", {
+        workspaceId: "workspace-1",
+        requiresAttention: true,
+        attentionReason: "permission",
+        attentionTimestamp: iso(fixedNow),
+        pendingPermissions: 1,
+      }),
+    });
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: "ready",
+      attention: [
+        { agentId: "agent-1", workspaceId: "workspace-1", workspaceName: "Main", reason: "user_input", hintedAt: fixedNow },
+      ],
+    });
+
+    harness.publishAgent({ kind: "upsert", agent: agent("agent-1", "running", { workspaceId: "workspace-1" }) });
+    expect(controller.getSnapshot()).toMatchObject({ phase: "ready", attention: [] });
+    controller.stop();
+  });
+
+  it("derives inactivity hints from the fixed threshold using the injected clock and timeline summaries", async () => {
+    let clock = Date.parse("2026-08-22T11:59:00.000Z");
+    const progressAt = new Date(clock).toISOString();
+    const harness = createPaseoHarness({
+      agents: [agent("agent-1", "running", { workspaceId: "workspace-1", createdAt: progressAt, updatedAt: progressAt })],
+      timeline: [{ item: { type: "assistant_message", text: "working" }, timestamp: progressAt }],
+    });
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers(), () => clock);
+    await controller.start();
+    await vi.waitFor(() => expect(controller.getSnapshot()).toMatchObject({ phase: "ready", attention: [] }));
+
+    clock += 15 * 60_000;
+    harness.publishAgent({ kind: "upsert", agent: agent("agent-1", "running", { workspaceId: "workspace-1", createdAt: progressAt, updatedAt: progressAt }) });
+    expect(controller.getSnapshot()).toMatchObject({
+      phase: "ready",
+      attention: [
+        { agentId: "agent-1", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: clock },
+      ],
+    });
+    controller.stop();
+  });
 });
 
 function createPaseoHarness(options: {
   workspaces?: ReturnType<typeof workspace>[];
   openingWorkspace?: ReturnType<typeof workspace> | null;
+  agents?: ReturnType<typeof agent>[];
+  timeline?: { item?: unknown; timestamp?: string }[];
   error?: Error;
 } = {}) {
   let workspaceHandler: (update: unknown) => void = () => undefined;
@@ -161,6 +217,10 @@ function createPaseoHarness(options: {
   const workspaces = options.workspaces ?? [
     workspace("workspace-1", "Main"),
     workspace("workspace-2", "Feature"),
+  ];
+  const agents = options.agents ?? [
+    agent("agent-1", "running", { workspaceId: "workspace-1" }),
+    agent("agent-2", "idle", { workspaceId: "workspace-2" }),
   ];
   const openingWorkspace =
     options.openingWorkspace === undefined ? workspaces[0] ?? null : options.openingWorkspace;
@@ -188,13 +248,16 @@ function createPaseoHarness(options: {
     agents: {
       list: vi.fn(async () => {
         maybeThrow();
-        return {
-          entries: [
-            { agent: agent("agent-1", "running", { workspaceId: "workspace-1" }) },
-            { agent: agent("agent-2", "idle", { workspaceId: "workspace-2" }) },
-          ],
-        };
+        return { entries: agents.map((agent) => ({ agent })) };
       }),
+      ref: vi.fn(() => ({
+        timeline: {
+          refetch: vi.fn(async () => {
+            maybeThrow();
+            return { entries: options.timeline ?? [], pageInfo: { hasOlder: false } };
+          }),
+        },
+      })),
       subscribe: vi.fn((handler: (update: unknown) => void) => {
         agentHandler = handler;
         return unsubscribeAgent;
@@ -236,16 +299,27 @@ function workspace(
 function agent(
   id: string,
   status: string,
-  overrides: Partial<{ workspaceId: string }> = {},
+  overrides: Partial<{
+    workspaceId: string;
+    requiresAttention: boolean;
+    attentionReason: string | null;
+    attentionTimestamp: string | null;
+    pendingPermissions: number;
+    createdAt: string;
+    updatedAt: string;
+  }> = {},
 ) {
   return {
     id,
     workspaceId: "workspace-1",
     title: id,
     status,
+    createdAt: "2026-08-22T12:00:00.000Z",
     updatedAt: "2026-08-22T12:00:00.000Z",
     requiresAttention: false,
     attentionReason: null,
+    attentionTimestamp: null,
+    pendingPermissions: 0,
     ...overrides,
   };
 }

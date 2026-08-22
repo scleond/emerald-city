@@ -1,136 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  aggregateModelUsage,
-  agentUsageTurns,
+  ATTENTION_INACTIVITY_THRESHOLD_MS,
   createProjectObservation,
-  emptyAgentUsage,
+  deriveAttentionQueue,
   normalizeTimelineEntry,
-  reduceAgentUsage,
-  type ObservatoryAgentUsageTurn,
+  type AttentionAgentInput,
+  type NormalizedTimelineEntry,
 } from "./observation";
-
-describe("aggregateModelUsage", () => {
-  it("treats cached input as a subset of input and totals input plus output per model", () => {
-    const bars = aggregateModelUsage([
-      usageAgent("a", "model-a", [
-        finalTurn("model-a", { inputTokens: 1000, cachedInputTokens: 400, outputTokens: 200 }),
-      ]),
-      usageAgent("b", "model-a", [
-        finalTurn("model-a", { inputTokens: 500, cachedInputTokens: 100, outputTokens: 50 }),
-        finalTurn(null, { inputTokens: 10, outputTokens: 5 }),
-      ]),
-    ]);
-
-    expect(bars).toEqual([
-      {
-        model: "model-a",
-        freshInputTokens: 1010,
-        cachedInputTokens: 500,
-        outputTokens: 255,
-        totalTokens: 1765,
-      },
-    ]);
-    expect(bars[0].totalTokens).toBe(1000 + 500 + 10 + 200 + 50 + 5);
-  });
-
-  it("segregates usage by model and excludes provisional live turns from totals", () => {
-    const record = reduceAgentUsage(
-      reduceAgentUsage(
-        reduceAgentUsage(emptyAgentUsage(), {
-          kind: "provisional",
-          turnId: "turn-1",
-          usage: { inputTokens: 900, outputTokens: 100 },
-        }),
-        { kind: "provisional", turnId: "turn-1", usage: { inputTokens: 1200, outputTokens: 150 } },
-      ),
-      {
-        kind: "final",
-        turnId: "turn-1",
-        model: "model-a",
-        usage: { inputTokens: 1500, cachedInputTokens: 300, outputTokens: 200 },
-      },
-    );
-
-    expect(agentUsageTurns(record)).toHaveLength(1);
-    const bars = aggregateModelUsage([usageAgent("a", null, record.finalizedTurns)]);
-    expect(bars).toEqual([
-      {
-        model: "model-a",
-        freshInputTokens: 1200,
-        cachedInputTokens: 300,
-        outputTokens: 200,
-        totalTokens: 1700,
-      },
-    ]);
-  });
-});
-
-describe("createProjectObservation usage", () => {
-  it("flags agents that switched models across finalized turns and skips archived workspaces", () => {
-    const view = createProjectObservation(
-      { id: "project-1", name: "Emerald City" },
-      [workspace("workspace-1", "Main"), workspace("archived", "Old", { archivingAt: "2026-08-22T12:00:00.000Z" })],
-      [
-        {
-          ...agent("switcher", "running"),
-          model: "model-a",
-          usage: {
-            finalizedTurns: [
-              { ...finalTurn("model-a", { inputTokens: 10, cachedInputTokens: 2, outputTokens: 5 }), turnId: "t1" },
-              { ...finalTurn("model-b", { inputTokens: 10, cachedInputTokens: 2, outputTokens: 5 }), turnId: "t2" },
-            ],
-            provisionalTurn: null,
-          },
-        },
-        {
-          ...agent("steady", "idle"),
-          model: "model-a",
-          usage: {
-            finalizedTurns: [
-              { ...finalTurn("model-a", { inputTokens: 10, cachedInputTokens: 2, outputTokens: 5 }), turnId: "t3" },
-              { ...finalTurn("model-a", { inputTokens: 10, cachedInputTokens: 2, outputTokens: 5 }), turnId: "t4" },
-            ],
-            provisionalTurn: null,
-          },
-        },
-        { ...agent("archived-agent", "running"), workspaceId: "archived" },
-      ],
-    );
-
-    const switcher = view.workspaces[0].agents.find(({ id }) => id === "switcher")!;
-    const steady = view.workspaces[0].agents.find(({ id }) => id === "steady")!;
-    expect(switcher.switchedModels).toBe(true);
-    expect(steady.switchedModels).toBe(false);
-    expect(view.workspaces[0].agents.find(({ id }) => id === "archived-agent")).toBeUndefined();
-    expect(view.models.map(({ model, totalTokens }) => ({ model, totalTokens }))).toEqual([
-      { model: "model-a", totalTokens: 45 },
-      { model: "model-b", totalTokens: 15 },
-    ]);
-  });
-});
-
-const finalTurn = (
-  model: string | null,
-  usage: Partial<{ inputTokens: number; cachedInputTokens: number; outputTokens: number }> = {},
-) => ({
-  turnId: `turn-${Math.random()}`,
-  model,
-  inputTokens: usage.inputTokens ?? 0,
-  cachedInputTokens: usage.cachedInputTokens ?? 0,
-  outputTokens: usage.outputTokens ?? 0,
-  costUsd: 0.01,
-  contextUsedTokens: null,
-  contextMaxTokens: null,
-  provisional: false,
-});
-
-function usageAgent(
-  id: string,
-  model: string | null,
-  finalizedTurns: ObservatoryAgentUsageTurn[],
-) {
-  return { id, model, usage: { finalizedTurns, provisionalTurn: null } };
-}
 
 describe("createProjectObservation", () => {
   it("groups agents by active workspace and summarizes every lifecycle state", () => {
@@ -215,6 +91,143 @@ describe("createProjectObservation", () => {
   });
 });
 
+describe("deriveAttentionQueue", () => {
+  it("collects agents from every active workspace, labels each entry with its workspace, and excludes archived ones", () => {
+    const entries = queue([
+      { agent: agent("main-worker", "running") },
+      { agent: agent("feature-worker", "running", { workspaceId: "workspace-2" }) },
+      { agent: agent("archived-worker", "running", { workspaceId: "archived" }) },
+      { agent: agent("stranger", "running", { workspaceId: "elsewhere" }) },
+    ], BASE + ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE);
+
+    expect(entries).toEqual([
+      { agentId: "feature-worker", workspaceId: "workspace-2", workspaceName: "Feature", reason: "inactivity", hintedAt: BASE + ATTENTION_INACTIVITY_THRESHOLD_MS },
+      { agentId: "main-worker", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: BASE + ATTENTION_INACTIVITY_THRESHOLD_MS },
+    ]);
+  });
+
+  it("raises a user-input hint immediately and clears it when the request is answered", () => {
+    const waiting = { agent: agent("asker", "running", { attentionTimestamp: new Date(BASE).toISOString(), pendingPermissions: 1 }) };
+    expect(queue([waiting], BASE)).toEqual([
+      { agentId: "asker", workspaceId: "workspace-1", workspaceName: "Main", reason: "user_input", hintedAt: BASE },
+    ]);
+
+    const answered = { agent: agent("asker", "running", { updatedAt: new Date(BASE + MINUTE).toISOString() }), timeline: [entry(BASE + MINUTE)] };
+    expect(queue([answered], BASE + ATTENTION_INACTIVITY_THRESHOLD_MS)).toEqual([]);
+  });
+
+  it("raises a user-input hint from a permission request event even without daemon attention flags", () => {
+    const input = { agent: agent("asker", "running"), timeline: [entry(BASE - 5 * MINUTE, { category: "permission_request", label: "Permission request", progress: true })] };
+    expect(queue([input], BASE)[0]).toMatchObject({ agentId: "asker", reason: "user_input", hintedAt: BASE - 5 * MINUTE });
+  });
+
+  it("raises terminal failed outcomes but not recovered transient failures", () => {
+    const terminal = { agent: agent("broken", "error", { updatedAt: new Date(BASE).toISOString() }) };
+    expect(queue([terminal], BASE)[0]).toMatchObject({ agentId: "broken", reason: "failure", hintedAt: BASE });
+
+    const transient = {
+      agent: agent("flaky", "running"),
+      timeline: [entry(BASE - MINUTE), entry(BASE - 2 * MINUTE, { category: "tool_activity", label: "Tool activity" }), entry(BASE - 3 * MINUTE, { category: "failure", label: "Failure", progress: false })],
+    };
+    expect(queue([transient], BASE)).toEqual([]);
+    expect(queue([transient], BASE + 60 * MINUTE).some((hint) => hint.reason === "failure")).toBe(false);
+
+    const escalated = {
+      agent: agent("stuck-flaky", "running"),
+      timeline: [entry(BASE - 3 * MINUTE, { category: "failure", label: "Failure", progress: false })],
+    };
+    expect(queue([escalated], BASE - 3 * MINUTE + ATTENTION_INACTIVITY_THRESHOLD_MS)[0]).toMatchObject({ agentId: "stuck-flaky", reason: "failure" });
+  });
+
+  it("raises inactivity only after the fixed non-configurable 15 minutes without meaningful progress", () => {
+    const worker = { agent: agent("worker", "running"), timeline: [entry(BASE - ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE)] };
+    expect(queue([worker], BASE - ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE + ATTENTION_INACTIVITY_THRESHOLD_MS - 1)).toEqual([]);
+    expect(queue([worker], BASE - ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE + ATTENTION_INACTIVITY_THRESHOLD_MS)).toEqual([
+      { agentId: "worker", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: BASE + MINUTE },
+    ]);
+  });
+
+  it("resets inactivity for progress-reporting heartbeats but not for silent ones", () => {
+    const beatAt = BASE - 30 * MINUTE;
+    const progressing = {
+      agent: agent("beating", "running"),
+      timeline: [entry(beatAt, { category: "other", label: "Heartbeat", heartbeat: true, progress: true })],
+    };
+    expect(queue([progressing], BASE)).toEqual([
+      { agentId: "beating", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: beatAt + ATTENTION_INACTIVITY_THRESHOLD_MS },
+    ]);
+
+    const silent = {
+      agent: agent("silent-beat", "running"),
+      timeline: [entry(beatAt, { category: "other", label: "Heartbeat", heartbeat: true, progress: false })],
+    };
+    expect(queue([silent], BASE)).toEqual([]);
+    expect(queue([silent], BASE + ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE)).toEqual([
+      { agentId: "silent-beat", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: BASE + ATTENTION_INACTIVITY_THRESHOLD_MS },
+    ]);
+  });
+
+  it("pauses inactivity during an observable long-running operation and resumes after it completes", () => {
+    const running = {
+      agent: agent("builder", "running"),
+      timeline: [entry(BASE - 30 * MINUTE, { category: "message" }), entry(BASE - 20 * MINUTE, { category: "tool_activity", label: "Tool activity", longRunning: true })],
+    };
+    expect(queue([running], BASE + 60 * MINUTE)).toEqual([]);
+
+    const finished = {
+      agent: agent("builder", "running"),
+      timeline: [entry(BASE - 10 * MINUTE, { category: "tool_activity", label: "Tool activity" }), entry(BASE - 20 * MINUTE, { category: "tool_activity", label: "Tool activity", longRunning: true })],
+    };
+    expect(queue([finished], BASE + 4 * MINUTE)).toEqual([]);
+    expect(queue([finished], BASE + 5 * MINUTE)).toEqual([
+      { agentId: "builder", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: BASE - 10 * MINUTE + ATTENTION_INACTIVITY_THRESHOLD_MS },
+    ]);
+  });
+
+  it("pauses inactivity while an active observable child dependency works and resumes when it finishes", () => {
+    const parent = { agent: agent("parent", "running") };
+    const delegated = { agent: agent("child", "running", { labels: { "paseo.parent-agent-id": "parent" } }), timeline: [entry(BASE + 89 * MINUTE)] };
+    expect(queue([parent, delegated], BASE + 90 * MINUTE)).toEqual([]);
+
+    const done = { agent: agent("child", "closed", { labels: { "paseo.parent-agent-id": "parent" } }) };
+    expect(queue([parent, done], BASE + 90 * MINUTE)).toEqual([
+      { agentId: "parent", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: BASE + ATTENTION_INACTIVITY_THRESHOLD_MS },
+    ]);
+  });
+
+  it("produces exactly one primary reason per agent ordered user input, failure, then inactivity", () => {
+    const everything = {
+      agent: agent("needy", "error", { requiresAttention: true, attentionReason: "permission", attentionTimestamp: new Date(BASE - MINUTE).toISOString(), pendingPermissions: 2 }),
+      timeline: [
+        entry(BASE - 40 * MINUTE, { category: "failure", label: "Failure", progress: false }),
+        entry(BASE - 60 * MINUTE),
+      ],
+    };
+    for (let tick = BASE; tick <= BASE + 120 * MINUTE; tick += 15 * MINUTE) {
+      expect(queue([everything], tick)).toEqual([
+        { agentId: "needy", workspaceId: "workspace-1", workspaceName: "Main", reason: "user_input", hintedAt: BASE - MINUTE },
+      ]);
+    }
+  });
+
+  it("sorts the queue by reason priority and then oldest hint first", () => {
+    const inputs = [
+      { agent: agent("late-input", "running", { attentionTimestamp: new Date(BASE - MINUTE).toISOString(), pendingPermissions: 1 }) },
+      { agent: agent("old-failure", "error", { updatedAt: new Date(BASE - 10 * MINUTE).toISOString(), workspaceId: "workspace-2" }) },
+      { agent: agent("new-failure", "error", { updatedAt: new Date(BASE - 2 * MINUTE).toISOString() }) },
+      { agent: agent("sleepy", "running"), timeline: [entry(BASE - 30 * MINUTE)] },
+      { agent: agent("idle-runner", "running", { workspaceId: "workspace-2" }), timeline: [entry(BASE - 45 * MINUTE)] },
+    ];
+    expect(queue(inputs, BASE)).toEqual([
+      { agentId: "late-input", workspaceId: "workspace-1", workspaceName: "Main", reason: "user_input", hintedAt: BASE - MINUTE },
+      { agentId: "old-failure", workspaceId: "workspace-2", workspaceName: "Feature", reason: "failure", hintedAt: BASE - 10 * MINUTE },
+      { agentId: "new-failure", workspaceId: "workspace-1", workspaceName: "Main", reason: "failure", hintedAt: BASE - 2 * MINUTE },
+      { agentId: "idle-runner", workspaceId: "workspace-2", workspaceName: "Feature", reason: "inactivity", hintedAt: BASE - 45 * MINUTE + ATTENTION_INACTIVITY_THRESHOLD_MS },
+      { agentId: "sleepy", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: BASE - 30 * MINUTE + ATTENTION_INACTIVITY_THRESHOLD_MS },
+    ]);
+  });
+});
+
 function workspace(
   id: string,
   name: string,
@@ -236,6 +249,10 @@ function agent(
     workspaceId: string;
     requiresAttention: boolean;
     attentionReason: string | null;
+    attentionTimestamp: string | null;
+    pendingPermissions: number;
+    createdAt: string;
+    updatedAt: string;
     labels: Record<string, string>;
   }> = {},
 ) {
@@ -244,11 +261,29 @@ function agent(
     workspaceId: "workspace-1",
     title: id,
     status,
+    createdAt: "2026-08-22T12:00:00.000Z",
     updatedAt: "2026-08-22T12:00:00.000Z",
     requiresAttention: false,
     attentionReason: null,
-    model: null,
+    attentionTimestamp: null,
+    pendingPermissions: 0,
     labels: {},
     ...overrides,
   };
 }
+
+const MINUTE = 60_000;
+const BASE = Date.parse("2026-08-22T12:00:00.000Z");
+
+function entry(at: number, overrides: Partial<NormalizedTimelineEntry> & { category?: NormalizedTimelineEntry["category"] } = {}): NormalizedTimelineEntry {
+  return { category: "message", label: "Message", summary: "", at: new Date(at).toISOString(), progress: true, ...overrides };
+}
+
+function queue(
+  agents: AttentionAgentInput[],
+  now: number,
+  workspaces = [workspace("workspace-1", "Main"), workspace("workspace-2", "Feature"), workspace("archived", "Old Oz", { archivingAt: "2026-08-22T12:00:00.000Z" })],
+) {
+  return deriveAttentionQueue({ project: { id: "project-1", name: "Emerald City" }, workspaces, agents, now });
+}
+

@@ -121,9 +121,10 @@ export function aggregateModelUsage(
 }
 
 export interface ObservatoryAgentSnapshot {
-  id: string; workspaceId: string; title: string | null; status: string; updatedAt: string;
-  requiresAttention: boolean; attentionReason: string | null; labels?: Record<string, string>;
-  model: string | null; usage?: AgentUsageRecord;
+  id: string; workspaceId: string; title: string | null; status: string; createdAt: string; updatedAt: string;
+  requiresAttention: boolean; attentionReason: string | null; attentionTimestamp: string | null;
+  pendingPermissions: number; labels?: Record<string, string>;
+  model?: string | null; usage?: AgentUsageRecord;
 }
 export interface ObservatoryAgentView {
   id: string; workspaceId: string; title: string; status: string; lifecycle: AgentLifecycle; updatedAt: string;
@@ -134,7 +135,15 @@ export interface ObservatoryWorkspaceView { id: string; name: string; agents: Ob
 export interface LifecycleCount { label: "Active" | "Waiting" | "Finished" | "Failed" | "Other"; count: number }
 export interface RawTimelineEntry { item?: unknown; timestamp?: string }
 export type TimelineCategory = "message" | "tool_activity" | "status_change" | "permission_request" | "failure" | "completion" | "other";
-export interface NormalizedTimelineEntry { category: TimelineCategory; label: string; summary: string; at: string }
+export interface NormalizedTimelineEntry {
+  category: TimelineCategory; label: string; summary: string; at: string;
+  /** Counts as meaningful progress: resets the fixed 15-minute inactivity timer. */
+  progress: boolean;
+  /** Automatic heartbeat entry: resets inactivity only when it reports progress or a status change (see `progress`). */
+  heartbeat?: boolean;
+  /** Start of an observable long-running operation that pauses the inactivity timer until it finishes. */
+  longRunning?: boolean;
+}
 export const TIMELINE_SUMMARY_LIMIT = 10;
 export const TIMELINE_DETAIL_LIMIT = 50;
 export interface ObservatoryViewModel { project: ObservatoryProject; counts: LifecycleCount[]; workspaces: ObservatoryWorkspaceView[]; models: ModelUsageBar[] }
@@ -175,18 +184,115 @@ function compareWorkspace(a: ObservatoryWorkspaceSnapshot, b: ObservatoryWorkspa
 function compareAgents(a: ObservatoryAgentView, b: ObservatoryAgentView) { return lifecycleOrder.indexOf(a.lifecycle) - lifecycleOrder.indexOf(b.lifecycle) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id) }
 function labelFor(l: AgentLifecycle): LifecycleCount["label"] { return l[0].toUpperCase() + l.slice(1) as LifecycleCount["label"] }
 function lifecycleFor(a: ObservatoryAgentSnapshot): AgentLifecycle { if (a.attentionReason === "permission") return "waiting"; if (["initializing", "running"].includes(a.status)) return "active"; if (["waiting", "needs_input", "permission"].includes(a.status)) return "waiting"; if (["idle", "closed"].includes(a.status)) return "finished"; if (["error", "failed"].includes(a.status)) return "failed"; return "other" }
-function toAgent(a: ObservatoryAgentSnapshot): ObservatoryAgentView { return { id: a.id, workspaceId: a.workspaceId, title: a.title?.trim() || a.id, status: a.status, lifecycle: lifecycleFor(a), updatedAt: a.updatedAt, parentId: a.labels?.[parentLabel] ?? null, parentTitle: null, parentWorkspaceId: null, depth: 0, model: a.model, usageTurns: agentUsageTurns(a.usage ?? emptyAgentUsage()), switchedModels: false } }
+function toAgent(a: ObservatoryAgentSnapshot): ObservatoryAgentView { return { id: a.id, workspaceId: a.workspaceId, title: a.title?.trim() || a.id, status: a.status, lifecycle: lifecycleFor(a), updatedAt: a.updatedAt, parentId: a.labels?.[parentLabel] ?? null, parentTitle: null, parentWorkspaceId: null, depth: 0, model: a.model ?? null, usageTurns: agentUsageTurns(a.usage ?? emptyAgentUsage()), switchedModels: false } }
 
 export function normalizeTimelineEntry(entry: RawTimelineEntry): NormalizedTimelineEntry {
   const item = entry.item && typeof entry.item === "object" ? entry.item as Record<string, unknown> : {};
   const type = String(item.type ?? item.kind ?? ""); const text = typeof item.text === "string" ? item.text : typeof item.summary === "string" ? item.summary : "";
   const summary = text.slice(0, 140); let category: TimelineCategory = "other"; let label = "Other activity";
-  if (["user_message", "assistant_message", "reasoning"].includes(type)) { category = "message"; label = "Message"; }
-  else if (type === "tool_call") { category = item.status === "failed" ? "failure" : "tool_activity"; label = category === "failure" ? "Failure" : "Tool activity"; }
-  else if (type === "error") { category = "failure"; label = "Failure"; }
-  else if (type === "status_change") { category = "status_change"; label = "Status change"; }
-  else if (type === "permission_request") { category = "permission_request"; label = "Permission request"; }
-  else if (type === "completion") { category = "completion"; label = "Completion"; }
-  return { category, label, summary, at: entry.timestamp ?? String(item.timestamp ?? "") };
+  let progress = false; let heartbeat: boolean | undefined; let longRunning: boolean | undefined;
+  if (type === "heartbeat") { category = "other"; label = "Heartbeat"; heartbeat = true; progress = item.progress === true || item.statusChange === true; }
+  else {
+    if (["user_message", "assistant_message", "reasoning"].includes(type)) { category = "message"; label = "Message"; progress = true; }
+    else if (type === "tool_call") { category = item.status === "failed" ? "failure" : "tool_activity"; label = category === "failure" ? "Failure" : "Tool activity"; if (category === "tool_activity") { progress = true; longRunning = item.status === "running" || undefined; } }
+    else if (type === "error") { category = "failure"; label = "Failure"; }
+    else if (type === "status_change") { category = "status_change"; label = "Status change"; progress = true; }
+    else if (type === "permission_request") { category = "permission_request"; label = "Permission request"; progress = true; }
+    else if (type === "completion") { category = "completion"; label = "Completion"; progress = true; }
+  }
+  return { category, label, summary, at: entry.timestamp ?? String(item.timestamp ?? ""), progress, ...(heartbeat ? { heartbeat } : {}), ...(longRunning ? { longRunning } : {}) };
 }
-export function synthesizeAttentionEntry(agent: ObservatoryAgentSnapshot): NormalizedTimelineEntry | null { if (!agent.requiresAttention) return null; const category = agent.attentionReason === "permission" ? "permission_request" : agent.attentionReason === "finished" ? "completion" : agent.attentionReason === "error" ? "failure" : "status_change"; return { category, label: category === "permission_request" ? "Permission request" : category === "completion" ? "Completion" : category === "failure" ? "Failure" : "Status change", summary: agent.status, at: agent.updatedAt }; }
+export function synthesizeAttentionEntry(agent: ObservatoryAgentSnapshot): NormalizedTimelineEntry | null { if (!agent.requiresAttention) return null; const category = agent.attentionReason === "permission" ? "permission_request" : agent.attentionReason === "finished" ? "completion" : agent.attentionReason === "error" ? "failure" : "status_change"; return { category, label: category === "permission_request" ? "Permission request" : category === "completion" ? "Completion" : category === "failure" ? "Failure" : "Status change", summary: agent.status, at: agent.updatedAt, progress: category !== "failure" }; }
+
+export type AttentionReasonKind = "user_input" | "failure" | "inactivity";
+export interface AttentionEntry { agentId: string; workspaceId: string; workspaceName: string; reason: AttentionReasonKind; hintedAt: number }
+export const ATTENTION_INACTIVITY_THRESHOLD_MS = 15 * 60 * 1000;
+const ATTENTION_REASON_PRIORITY: Record<AttentionReasonKind, number> = { user_input: 0, failure: 1, inactivity: 2 };
+export const ATTENTION_REASON_LABELS: Record<AttentionReasonKind, string> = { user_input: "Waiting for you", failure: "Failed", inactivity: "Inactive" };
+export interface AttentionAgentInput { agent: ObservatoryAgentSnapshot; timeline?: readonly NormalizedTimelineEntry[] }
+
+/**
+ * Derives the project attention queue deterministically from snapshots alone. `now` must be
+ * injected by the caller so the result is a pure function of its inputs.
+ *
+ * Rules (at most one primary reason per agent, priority user input > failure > inactivity):
+ * - an explicit pending permission/user-input request raises immediately and clears when answered or resumed;
+ * - a terminal failed outcome raises; a transient failure only escalates after the fixed threshold
+ *   without any recovery activity;
+ * - a working agent raises inactivity after the fixed 15-minute threshold without meaningful
+ *   progress; heartbeats reset it only when they report progress or a status change, and observable
+ *   long-running operations plus active observable child dependencies pause timing.
+ */
+export function deriveAttentionQueue(input: {
+  project: ObservatoryProject;
+  workspaces: readonly ObservatoryWorkspaceSnapshot[];
+  agents: readonly AttentionAgentInput[];
+  now: number;
+}): AttentionEntry[] {
+  const names = new Map(input.workspaces.filter(w => w.projectId === input.project.id && w.archivingAt === null).map(w => [w.id, w.name] as const));
+  const entries: AttentionEntry[] = [];
+  for (const item of input.agents) {
+    if (!names.has(item.agent.workspaceId)) continue;
+    const reason = deriveAttentionReason(item.agent, item.timeline ?? [], input.agents, input.now);
+    if (!reason) continue;
+    entries.push({ agentId: item.agent.id, workspaceId: item.agent.workspaceId, workspaceName: names.get(item.agent.workspaceId) ?? "", reason: reason.kind, hintedAt: reason.hintedAt });
+  }
+  return entries.sort(compareAttentionEntries);
+}
+function compareAttentionEntries(a: AttentionEntry, b: AttentionEntry): number {
+  return ATTENTION_REASON_PRIORITY[a.reason] - ATTENTION_REASON_PRIORITY[b.reason] || a.hintedAt - b.hintedAt || a.agentId.localeCompare(b.agentId);
+}
+function deriveAttentionReason(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[], all: readonly AttentionAgentInput[], now: number): { kind: AttentionReasonKind; hintedAt: number } | null {
+  const requestedAt = permissionRequestedAt(agent, timeline);
+  if (requestedAt !== null) return { kind: "user_input", hintedAt: requestedAt };
+  return failureHint(agent, timeline, now) ?? inactivityHint(agent, timeline, all, now);
+}
+function permissionRequestedAt(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[]): number | null {
+  const flagged = agent.pendingPermissions > 0 || agent.attentionReason === "permission";
+  const latestRequestAt = latestTime(timeline.filter(e => e.category === "permission_request").map(e => e.at));
+  if (!flagged) {
+    if (latestRequestAt === null) return null;
+    // Without a daemon attention flag the request stands until newer meaningful activity answers or resumes it.
+    const superseded = timeline.some(e => e.progress && !e.heartbeat && e.category !== "permission_request" && (parseTime(e.at) ?? -Infinity) > latestRequestAt);
+    if (superseded) return null;
+  }
+  return parseTime(agent.attentionTimestamp) ?? latestRequestAt ?? parseTime(agent.updatedAt) ?? 0;
+}
+function failureHint(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[], now: number): { kind: "failure"; hintedAt: number } | null {
+  const lastFailureAt = latestTime(timeline.filter(e => e.category === "failure").map(e => e.at));
+  if (lifecycleFor(agent) === "failed") return { kind: "failure", hintedAt: lastFailureAt ?? parseTime(agent.updatedAt) ?? 0 };
+  if (lastFailureAt === null || lastFailureAt > now) return null;
+  if (timeline.some(e => e.progress && (parseTime(e.at) ?? -Infinity) > lastFailureAt)) return null;
+  return now - lastFailureAt >= ATTENTION_INACTIVITY_THRESHOLD_MS ? { kind: "failure", hintedAt: lastFailureAt + ATTENTION_INACTIVITY_THRESHOLD_MS } : null;
+}
+function inactivityHint(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[], all: readonly AttentionAgentInput[], now: number): { kind: "inactivity"; hintedAt: number } | null {
+  if (lifecycleFor(agent) !== "active" || inactivityPaused(agent, timeline, all)) return null;
+  const lastProgressAt = latestProgressAt(agent, timeline);
+  if (lastProgressAt === null || lastProgressAt > now || now - lastProgressAt < ATTENTION_INACTIVITY_THRESHOLD_MS) return null;
+  return { kind: "inactivity", hintedAt: lastProgressAt + ATTENTION_INACTIVITY_THRESHOLD_MS };
+}
+function latestProgressAt(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[]): number | null {
+  // Inactivity measures observed progress only: heartbeats without progress and other
+  // non-progress entries never move this forward. Creation time is the fallback for agents
+  // whose recent timeline carries no progress entry at all.
+  return latestTime(timeline.filter(e => e.progress).map(e => e.at)) ?? parseTime(agent.createdAt) ?? parseTime(agent.updatedAt);
+}
+function inactivityPaused(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[], all: readonly AttentionAgentInput[]): boolean {
+  for (const entry of [...timeline].sort((a, b) => (parseTime(b.at) ?? 0) - (parseTime(a.at) ?? 0))) {
+    if (entry.heartbeat) continue;
+    if (entry.longRunning) return true;
+    break;
+  }
+  return all.some(item => item.agent.id !== agent.id && item.agent.labels?.[parentLabel] === agent.id && lifecycleFor(item.agent) === "active");
+}
+function parseTime(value: string | null | undefined): number | null {
+  const parsed = value ? Date.parse(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function latestTime(values: readonly (string | null | undefined)[]): number | null {
+  let latest: number | null = null;
+  for (const value of values) { const parsed = parseTime(value); if (parsed !== null && (latest === null || parsed > latest)) latest = parsed; }
+  return latest;
+}
+
+

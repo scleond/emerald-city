@@ -1,12 +1,8 @@
 import { type PluginWorkspacePanelProps, usePaseo } from "@getpaseo/plugin";
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Pressable, ScrollView, Text, TextInput, View, type TextStyle, type ViewStyle } from "react-native";
-import type { AgentLifecycle } from "./observation";
-import type {
-  ModelUsageBar,
-  ObservatoryAgentUsageTurn,
-  ObservatoryViewModel,
-} from "./observation";
+import { ATTENTION_REASON_LABELS, type AgentLifecycle, type AttentionEntry, type AttentionReasonKind, type ModelUsageBar, type ObservatoryAgentUsageTurn } from "./observation";
+import type { ObservatoryViewModel } from "./observation";
 import {
   ProjectObservationController,
   type ProjectObservationState,
@@ -95,6 +91,38 @@ export function AgentObservatoryPanel({
       status: {
         color: theme.colors.foregroundMuted,
         fontSize: 13,
+      },
+      attentionRow: {
+        gap: 2,
+        paddingVertical: layout.compact ? 8 : 10,
+        paddingHorizontal: layout.compact ? 10 : 12,
+        borderRadius: 10,
+      },
+      reasonUserInput: {
+        color: theme.colors.accent,
+        fontSize: layout.compact ? 12 : 13,
+        fontWeight: "700" as const,
+      },
+      reasonFailure: {
+        color: theme.colors.statusDanger,
+        fontSize: layout.compact ? 12 : 13,
+        fontWeight: "700" as const,
+      },
+      reasonInactivity: {
+        color: theme.colors.foregroundMuted,
+        fontSize: layout.compact ? 12 : 13,
+        fontWeight: "700" as const,
+      },
+      workspaceBadge: {
+        color: theme.colors.accentForeground,
+        backgroundColor: theme.colors.accent,
+        alignSelf: "flex-start" as const,
+        overflow: "hidden" as const,
+        fontSize: 11,
+        fontWeight: "600" as const,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 6,
       },
       error: {
         color: theme.colors.statusDanger,
@@ -223,6 +251,11 @@ interface PanelStyles {
   workspaceTitle: TextStyle;
   agentTitle: TextStyle;
   status: TextStyle;
+  attentionRow: ViewStyle;
+  reasonUserInput: TextStyle;
+  reasonFailure: TextStyle;
+  reasonInactivity: TextStyle;
+  workspaceBadge: TextStyle;
   error: TextStyle;
   usageSection: ViewStyle;
   barRow: ViewStyle;
@@ -246,6 +279,37 @@ interface PanelStyles {
   detailLine: TextStyle;
 }
 
+const ATTENTION_REASON_STYLES: Record<AttentionReasonKind, keyof PanelStyles> = {
+  user_input: "reasonUserInput",
+  failure: "reasonFailure",
+  inactivity: "reasonInactivity",
+};
+
+function AttentionQueue({ attention, titles, styles, selectAgent }: { attention: AttentionEntry[]; titles: Map<string, string>; styles: PanelStyles; selectAgent: (id: string) => void }) {
+  if (attention.length === 0) return null;
+  return (
+    <View accessibilityLabel="Project attention queue">
+      <Text accessibilityRole="header" style={styles.sectionTitle}>
+        Needs attention
+      </Text>
+      {attention.map((entry) => (
+        <Pressable
+          key={`${entry.agentId}-${entry.reason}`}
+          onPress={() => selectAgent(entry.agentId)}
+          accessibilityLabel={`${ATTENTION_REASON_LABELS[entry.reason]}: ${titles.get(entry.agentId) ?? entry.agentId} in ${entry.workspaceName}`}
+          style={styles.attentionRow}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Text style={styles[ATTENTION_REASON_STYLES[entry.reason]]}>{ATTENTION_REASON_LABELS[entry.reason]}</Text>
+            <Text style={styles.workspaceBadge}>{entry.workspaceName}</Text>
+          </View>
+          <Text style={styles.agentTitle}>{titles.get(entry.agentId) ?? entry.agentId}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
 function StateContent({ state, styles, selectedAgentId, selectAgent, loadMore }: { state: ProjectObservationState; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void }) {
   if (state.phase === "loading") {
     return <Text style={styles.subtitle}>Loading project agents…</Text>;
@@ -266,11 +330,12 @@ function StateContent({ state, styles, selectedAgentId, selectAgent, loadMore }:
       </View>
     );
   }
-  return <ReadyContent view={state.view} styles={styles} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} />;
+  return <ReadyContent view={state.view} styles={styles} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} />;
 }
 
-function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, timeline }: { view: ObservatoryViewModel; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, TimelineSummaryView> }) {
+function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, timeline, attention }: { view: ObservatoryViewModel; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[] }) {
   const agentCount = view.workspaces.reduce((total, workspace) => total + workspace.agents.length, 0);
+  const titles = new Map(view.workspaces.flatMap((workspace) => workspace.agents.map((agent) => [agent.id, agent.title] as const)));
   return (
     <>
       <Text style={styles.subtitle}>{view.project.name}</Text>
@@ -282,34 +347,7 @@ function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, ti
           </View>
         ))}
       </View>
-      <View style={styles.usageSection}>
-        <Text accessibilityRole="header" style={styles.sectionTitle}>
-          Usage by model
-        </Text>
-        {view.models.length === 0 ? (
-          <Text style={styles.subtitle}>No reported token usage yet.</Text>
-        ) : (
-          <>
-            {view.models.map((bar) => (
-              <ModelBar key={bar.model} bar={bar} styles={styles} />
-            ))}
-            <View style={styles.legend}>
-              <View style={styles.legendItem}>
-                <View style={styles.legendSwatchFresh} />
-                <Text style={styles.tokenTotal}>Fresh input</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={styles.legendSwatchCached} />
-                <Text style={styles.tokenTotal}>Cached input</Text>
-              </View>
-              <View style={styles.legendItem}>
-                <View style={styles.legendSwatchOutput} />
-                <Text style={styles.tokenTotal}>Output</Text>
-              </View>
-            </View>
-          </>
-        )}
-      </View>
+      <AttentionQueue attention={attention} titles={titles} styles={styles} selectAgent={selectAgent} />
       <Text accessibilityRole="header" style={styles.sectionTitle}>
         Workspaces
       </Text>
@@ -479,3 +517,4 @@ function TurnColumn({ turn, styles }: { turn: ObservatoryAgentUsageTurn; styles:
     </View>
   );
 }
+

@@ -1,6 +1,8 @@
 import type { PaseoAgent, PaseoApi, PaseoWorkspace } from "@getpaseo/client";
 import {
   createProjectObservation,
+  deriveAttentionQueue,
+  type AttentionEntry,
   emptyAgentUsage,
   reduceAgentUsage,
   type AgentUsageEvent,
@@ -33,7 +35,7 @@ export type ObservatoryPaseoApi = Omit<Pick<PaseoApi, "workspaces" | "agents">, 
 
 export type ProjectObservationState =
   | { phase: "loading" }
-  | { phase: "ready"; view: ObservatoryViewModel; timeline?: Record<string, TimelineState> }
+  | { phase: "ready"; view: ObservatoryViewModel; attention: AttentionEntry[]; timeline?: Record<string, TimelineState> }
   | { phase: "disconnected"; message: string }
   | { phase: "unavailable"; message: string };
 
@@ -71,6 +73,7 @@ export class ProjectObservationController {
       setInterval: (callback, milliseconds) => globalThis.setInterval(callback, milliseconds),
       clearInterval: (handle) => globalThis.clearInterval(handle as ReturnType<typeof setInterval>),
     },
+    private readonly now: () => number = () => Date.now(),
   ) {}
 
   getSnapshot = (): ProjectObservationState => this.state;
@@ -282,7 +285,7 @@ export class ProjectObservationController {
   private trackAgent(agentId: string, agent: ObservatoryAgentSnapshot): void {
     this.agents.set(agentId, agent);
     if (!this.agentModels.has(agentId)) {
-      this.agentModels.set(agentId, agent.model);
+      this.agentModels.set(agentId, agent.model ?? null);
       this.usage.set(agentId, emptyAgentUsage());
     }
     this.subscribeAgentStream(agentId);
@@ -342,6 +345,15 @@ export class ProjectObservationController {
         })),
         { query: this.query, lifecycles: this.lifecycles },
       ),
+      attention: deriveAttentionQueue({
+        project: this.project,
+        workspaces: [...this.workspaces.values()],
+        agents: [...this.agents.values()].map((agent) => ({
+          agent,
+          timeline: this.timelines.get(agent.id)?.entries,
+        })),
+        now: this.now(),
+      }),
       timeline: Object.fromEntries(this.timelines),
     });
   }
@@ -375,9 +387,12 @@ function toAgent(agent: PaseoAgent): ObservatoryAgentSnapshot {
     workspaceId: agent.workspaceId ?? "",
     title: agent.title,
     status: agent.status,
+    createdAt: agent.createdAt,
     updatedAt: agent.updatedAt,
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,
+    attentionTimestamp: (agent as any).attentionTimestamp ?? null,
+    pendingPermissions: (agent as any).pendingPermissions?.length ?? 0,
     model: agent.model ?? null,
     labels: agent.labels,
   };
@@ -392,3 +407,7 @@ function toUsageEvent(event: ObservatoryAgentStreamEvent): AgentUsageEvent | nul
   }
   return null;
 }
+
+
+
+
