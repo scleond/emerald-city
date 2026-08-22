@@ -12,6 +12,123 @@ export interface ObservatoryWorkspaceSnapshot {
   archivingAt: string | null;
 }
 
+export interface ObservatoryUsageFields {
+  inputTokens?: number;
+  cachedInputTokens?: number;
+  outputTokens?: number;
+  totalCostUsd?: number;
+  contextWindowUsedTokens?: number;
+  contextWindowMaxTokens?: number;
+}
+
+export type AgentUsageEvent =
+  | { kind: "provisional"; turnId?: string; model?: string | null; usage?: ObservatoryUsageFields }
+  | { kind: "final"; turnId?: string; model?: string | null; usage?: ObservatoryUsageFields };
+
+export interface ObservatoryAgentUsageTurn {
+  turnId: string | null;
+  model: string | null;
+  inputTokens: number | null;
+  cachedInputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
+  contextUsedTokens: number | null;
+  contextMaxTokens: number | null;
+  provisional: boolean;
+}
+
+export interface AgentUsageRecord {
+  finalizedTurns: ObservatoryAgentUsageTurn[];
+  provisionalTurn: ObservatoryAgentUsageTurn | null;
+}
+
+export function emptyAgentUsage(): AgentUsageRecord {
+  return { finalizedTurns: [], provisionalTurn: null };
+}
+
+function toUsageTurn(
+  event: AgentUsageEvent,
+  fallbackModel: string | null,
+): ObservatoryAgentUsageTurn {
+  const usage = event.usage ?? {};
+  return {
+    turnId: event.turnId ?? null,
+    model: event.model ?? fallbackModel,
+    inputTokens: usage.inputTokens ?? null,
+    cachedInputTokens: usage.cachedInputTokens ?? null,
+    outputTokens: usage.outputTokens ?? null,
+    costUsd: usage.totalCostUsd ?? null,
+    contextUsedTokens: usage.contextWindowUsedTokens ?? null,
+    contextMaxTokens: usage.contextWindowMaxTokens ?? null,
+    provisional: event.kind === "provisional",
+  };
+}
+
+export function reduceAgentUsage(
+  record: AgentUsageRecord,
+  event: AgentUsageEvent,
+  agentModel: string | null = null,
+): AgentUsageRecord {
+  if (event.kind === "provisional") {
+    return { ...record, provisionalTurn: toUsageTurn(event, agentModel) };
+  }
+  const finalized = record.finalizedTurns.filter(
+    (turn) => !event.turnId || turn.turnId !== event.turnId,
+  );
+  finalized.push(toUsageTurn(event, agentModel));
+  return {
+    finalizedTurns: finalized,
+    provisionalTurn:
+      !event.turnId || record.provisionalTurn?.turnId === event.turnId
+        ? null
+        : record.provisionalTurn,
+  };
+}
+
+export function agentUsageTurns(record: AgentUsageRecord): ObservatoryAgentUsageTurn[] {
+  return record.provisionalTurn
+    ? [...record.finalizedTurns, record.provisionalTurn]
+    : [...record.finalizedTurns];
+}
+
+export interface ModelUsageBar {
+  model: string;
+  freshInputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
+
+export function aggregateModelUsage(
+  agents: readonly {
+    model: string | null;
+    usage: AgentUsageRecord;
+  }[],
+): ModelUsageBar[] {
+  const byModel = new Map<string, ModelUsageBar>();
+  for (const agent of agents) {
+    for (const turn of agent.usage.finalizedTurns) {
+      const model = turn.model ?? agent.model ?? "unknown";
+      const bar = byModel.get(model) ?? {
+        model,
+        freshInputTokens: 0,
+        cachedInputTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+      };
+      const input = turn.inputTokens ?? 0;
+      const cached = Math.min(turn.cachedInputTokens ?? 0, input);
+      const output = turn.outputTokens ?? 0;
+      bar.freshInputTokens += Math.max(0, input - cached);
+      bar.cachedInputTokens += cached;
+      bar.outputTokens += output;
+      bar.totalTokens += input + output;
+      byModel.set(model, bar);
+    }
+  }
+  return [...byModel.values()].sort((left, right) => left.model.localeCompare(right.model));
+}
+
 export interface ObservatoryAgentSnapshot {
   id: string;
   workspaceId: string;
@@ -20,6 +137,8 @@ export interface ObservatoryAgentSnapshot {
   updatedAt: string;
   requiresAttention: boolean;
   attentionReason: string | null;
+  model: string | null;
+  usage?: AgentUsageRecord;
 }
 
 export interface ObservatoryAgentView {
@@ -29,6 +148,9 @@ export interface ObservatoryAgentView {
   status: string;
   lifecycle: AgentLifecycle;
   updatedAt: string;
+  model: string | null;
+  usageTurns: ObservatoryAgentUsageTurn[];
+  switchedModels: boolean;
 }
 
 export interface ObservatoryWorkspaceView {
@@ -46,6 +168,7 @@ export interface ObservatoryViewModel {
   project: ObservatoryProject;
   counts: LifecycleCount[];
   workspaces: ObservatoryWorkspaceView[];
+  models: ModelUsageBar[];
 }
 
 const lifecycleOrder: AgentLifecycle[] = ["active", "waiting", "failed", "finished", "other"];
@@ -71,6 +194,9 @@ export function createProjectObservation(
       status: snapshot.status,
       lifecycle: lifecycleFor(snapshot),
       updatedAt: snapshot.updatedAt,
+      model: snapshot.model,
+      usageTurns: agentUsageTurns(snapshot.usage ?? emptyAgentUsage()),
+      switchedModels: false,
     });
     agentsByWorkspace.set(snapshot.workspaceId, agents);
   }
@@ -83,6 +209,12 @@ export function createProjectObservation(
   const agents = workspaces.flatMap((workspace) => workspace.agents);
   const count = (lifecycle: AgentLifecycle) =>
     agents.reduce((total, agent) => total + Number(agent.lifecycle === lifecycle), 0);
+  for (const agent of agents) {
+    agent.switchedModels =
+      new Set(
+        agent.usageTurns.filter((turn) => !turn.provisional).map((turn) => turn.model ?? agent.model),
+      ).size > 1;
+  }
 
   return {
     project,
@@ -93,6 +225,12 @@ export function createProjectObservation(
       { label: "Failed", count: count("failed") },
       { label: "Other", count: count("other") },
     ],
+    models: aggregateModelUsage(
+      agents.map((agent) => ({
+        model: agent.model,
+        usage: { finalizedTurns: agent.usageTurns, provisionalTurn: null },
+      })),
+    ),
     workspaces,
   };
 }

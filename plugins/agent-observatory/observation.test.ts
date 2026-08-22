@@ -1,5 +1,135 @@
 import { describe, expect, it } from "vitest";
-import { createProjectObservation } from "./observation";
+import {
+  aggregateModelUsage,
+  agentUsageTurns,
+  createProjectObservation,
+  emptyAgentUsage,
+  reduceAgentUsage,
+  type ObservatoryAgentUsageTurn,
+} from "./observation";
+
+describe("aggregateModelUsage", () => {
+  it("treats cached input as a subset of input and totals input plus output per model", () => {
+    const bars = aggregateModelUsage([
+      usageAgent("a", "model-a", [
+        finalTurn("model-a", { inputTokens: 1000, cachedInputTokens: 400, outputTokens: 200 }),
+      ]),
+      usageAgent("b", "model-a", [
+        finalTurn("model-a", { inputTokens: 500, cachedInputTokens: 100, outputTokens: 50 }),
+        finalTurn(null, { inputTokens: 10, outputTokens: 5 }),
+      ]),
+    ]);
+
+    expect(bars).toEqual([
+      {
+        model: "model-a",
+        freshInputTokens: 1010,
+        cachedInputTokens: 500,
+        outputTokens: 255,
+        totalTokens: 1765,
+      },
+    ]);
+    expect(bars[0].totalTokens).toBe(1000 + 500 + 10 + 200 + 50 + 5);
+  });
+
+  it("segregates usage by model and excludes provisional live turns from totals", () => {
+    const record = reduceAgentUsage(
+      reduceAgentUsage(
+        reduceAgentUsage(emptyAgentUsage(), {
+          kind: "provisional",
+          turnId: "turn-1",
+          usage: { inputTokens: 900, outputTokens: 100 },
+        }),
+        { kind: "provisional", turnId: "turn-1", usage: { inputTokens: 1200, outputTokens: 150 } },
+      ),
+      {
+        kind: "final",
+        turnId: "turn-1",
+        model: "model-a",
+        usage: { inputTokens: 1500, cachedInputTokens: 300, outputTokens: 200 },
+      },
+    );
+
+    expect(agentUsageTurns(record)).toHaveLength(1);
+    const bars = aggregateModelUsage([usageAgent("a", null, record.finalizedTurns)]);
+    expect(bars).toEqual([
+      {
+        model: "model-a",
+        freshInputTokens: 1200,
+        cachedInputTokens: 300,
+        outputTokens: 200,
+        totalTokens: 1700,
+      },
+    ]);
+  });
+});
+
+describe("createProjectObservation usage", () => {
+  it("flags agents that switched models across finalized turns and skips archived workspaces", () => {
+    const view = createProjectObservation(
+      { id: "project-1", name: "Emerald City" },
+      [workspace("workspace-1", "Main"), workspace("archived", "Old", { archivingAt: "2026-08-22T12:00:00.000Z" })],
+      [
+        {
+          ...agent("switcher", "running"),
+          model: "model-a",
+          usage: {
+            finalizedTurns: [
+              { ...finalTurn("model-a", { inputTokens: 10, cachedInputTokens: 2, outputTokens: 5 }), turnId: "t1" },
+              { ...finalTurn("model-b", { inputTokens: 10, cachedInputTokens: 2, outputTokens: 5 }), turnId: "t2" },
+            ],
+            provisionalTurn: null,
+          },
+        },
+        {
+          ...agent("steady", "idle"),
+          model: "model-a",
+          usage: {
+            finalizedTurns: [
+              { ...finalTurn("model-a", { inputTokens: 10, cachedInputTokens: 2, outputTokens: 5 }), turnId: "t3" },
+              { ...finalTurn("model-a", { inputTokens: 10, cachedInputTokens: 2, outputTokens: 5 }), turnId: "t4" },
+            ],
+            provisionalTurn: null,
+          },
+        },
+        { ...agent("archived-agent", "running"), workspaceId: "archived" },
+      ],
+    );
+
+    const switcher = view.workspaces[0].agents.find(({ id }) => id === "switcher")!;
+    const steady = view.workspaces[0].agents.find(({ id }) => id === "steady")!;
+    expect(switcher.switchedModels).toBe(true);
+    expect(steady.switchedModels).toBe(false);
+    expect(view.workspaces[0].agents.find(({ id }) => id === "archived-agent")).toBeUndefined();
+    expect(view.models.map(({ model, totalTokens }) => ({ model, totalTokens }))).toEqual([
+      { model: "model-a", totalTokens: 45 },
+      { model: "model-b", totalTokens: 15 },
+    ]);
+  });
+});
+
+const finalTurn = (
+  model: string | null,
+  usage: Partial<{ inputTokens: number; cachedInputTokens: number; outputTokens: number }> = {},
+) => ({
+  turnId: `turn-${Math.random()}`,
+  model,
+  inputTokens: usage.inputTokens ?? 0,
+  cachedInputTokens: usage.cachedInputTokens ?? 0,
+  outputTokens: usage.outputTokens ?? 0,
+  costUsd: 0.01,
+  contextUsedTokens: null,
+  contextMaxTokens: null,
+  provisional: false,
+});
+
+function usageAgent(
+  id: string,
+  model: string | null,
+  finalizedTurns: ObservatoryAgentUsageTurn[],
+) {
+  return { id, model, usage: { finalizedTurns, provisionalTurn: null } };
+}
 
 describe("createProjectObservation", () => {
   it("groups agents by active workspace and summarizes every lifecycle state", () => {
@@ -88,6 +218,7 @@ function agent(
     updatedAt: "2026-08-22T12:00:00.000Z",
     requiresAttention: false,
     attentionReason: null,
+    model: null,
     ...overrides,
   };
 }

@@ -1,13 +1,38 @@
 import type { PaseoAgent, PaseoApi, PaseoWorkspace } from "@getpaseo/client";
 import {
   createProjectObservation,
+  emptyAgentUsage,
+  reduceAgentUsage,
+  type AgentUsageEvent,
+  type AgentUsageRecord,
   type ObservatoryAgentSnapshot,
   type ObservatoryProject,
   type ObservatoryViewModel,
   type ObservatoryWorkspaceSnapshot,
+  type ObservatoryUsageFields,
 } from "./observation";
 
-export type ObservatoryPaseoApi = Pick<PaseoApi, "workspaces" | "agents">;
+export interface ObservatoryAgentStreamEvent {
+  type: string;
+  turnId?: string;
+  usage?: ObservatoryUsageFields;
+  runtimeInfo?: { model?: string | null } | null;
+}
+
+export interface ObservatoryAgentStreamPayload {
+  agentId: string;
+  event: ObservatoryAgentStreamEvent;
+}
+
+export interface ObservatoryAgentTimelineHandle {
+  subscribe(handler: (payload: ObservatoryAgentStreamPayload) => void): () => void;
+}
+
+export type ObservatoryPaseoApi = Pick<PaseoApi, "workspaces" | "agents"> & {
+  agents: Pick<PaseoApi["agents"], "list" | "subscribe"> & {
+    ref(agentId: string): { timeline: ObservatoryAgentTimelineHandle };
+  };
+};
 
 export type ProjectObservationState =
   | { phase: "loading" }
@@ -27,6 +52,9 @@ export class ProjectObservationController {
   private readonly listeners = new Set<() => void>();
   private readonly workspaces = new Map<string, ObservatoryWorkspaceSnapshot>();
   private readonly agents = new Map<string, ObservatoryAgentSnapshot>();
+  private readonly usage = new Map<string, AgentUsageRecord>();
+  private readonly agentModels = new Map<string, string | null>();
+  private readonly streams = new Map<string, () => void>();
   private project: ObservatoryProject | null = null;
   private unsubscribeWorkspace: (() => void) | null = null;
   private unsubscribeAgent: (() => void) | null = null;
@@ -65,11 +93,11 @@ export class ProjectObservationController {
     this.unsubscribeAgent = this.paseo.agents.subscribe((update) => {
       if (!this.active) return;
       if (update.kind === "upsert" && this.workspaces.has(update.agent.workspaceId ?? "")) {
-        this.agents.set(update.agent.id, toAgent(update.agent));
+        this.trackAgent(update.agent.id, toAgent(update.agent));
       } else if (update.kind === "upsert") {
-        this.agents.delete(update.agent.id);
+        this.removeAgent(update.agent.id);
       } else {
-        this.agents.delete(update.agentId);
+        this.removeAgent(update.agentId);
       }
       this.publishReady();
     });
@@ -86,6 +114,10 @@ export class ProjectObservationController {
     this.unsubscribeAgent?.();
     this.unsubscribeWorkspace = null;
     this.unsubscribeAgent = null;
+    for (const unsubscribe of this.streams.values()) unsubscribe();
+    this.streams.clear();
+    this.usage.clear();
+    this.agentModels.clear();
     this.directorySubscriptionsActive = false;
     if (this.timer !== null) {
       this.timers.clearInterval(this.timer);
@@ -110,7 +142,7 @@ export class ProjectObservationController {
   private removeWorkspace(workspaceId: string): void {
     this.workspaces.delete(workspaceId);
     for (const [agentId, agent] of this.agents) {
-      if (agent.workspaceId === workspaceId) this.agents.delete(agentId);
+      if (agent.workspaceId === workspaceId) this.removeAgent(agentId);
     }
     if (this.workspaces.size === 0 && this.project) {
       this.publish({
@@ -153,7 +185,20 @@ export class ProjectObservationController {
       }
       this.agents.clear();
       for (const agent of agents) {
-        if (this.workspaces.has(agent.workspaceId)) this.agents.set(agent.id, agent);
+        if (this.workspaces.has(agent.workspaceId)) this.trackAgent(agent.id, agent);
+      }
+      const tracked = new Set(this.agents.keys());
+      for (const id of [...this.usage.keys(), ...this.agentModels.keys()]) {
+        if (!tracked.has(id)) {
+          this.usage.delete(id);
+          this.agentModels.delete(id);
+        }
+      }
+      for (const [id, unsubscribe] of this.streams) {
+        if (!tracked.has(id)) {
+          unsubscribe();
+          this.streams.delete(id);
+        }
       }
       if (this.workspaces.size === 0) {
         this.publish({
@@ -209,6 +254,56 @@ export class ProjectObservationController {
     return entries;
   }
 
+  private trackAgent(agentId: string, agent: ObservatoryAgentSnapshot): void {
+    this.agents.set(agentId, agent);
+    if (!this.agentModels.has(agentId)) {
+      this.agentModels.set(agentId, agent.model);
+      this.usage.set(agentId, emptyAgentUsage());
+    }
+    this.subscribeAgentStream(agentId);
+  }
+
+  private removeAgent(agentId: string): void {
+    this.agents.delete(agentId);
+    this.usage.delete(agentId);
+    this.agentModels.delete(agentId);
+    const unsubscribe = this.streams.get(agentId);
+    if (unsubscribe) {
+      unsubscribe();
+      this.streams.delete(agentId);
+    }
+  }
+
+  private subscribeAgentStream(agentId: string): void {
+    if (this.streams.has(agentId)) return;
+    try {
+      const unsubscribe = this.paseo.agents
+        .ref(agentId)
+        .timeline.subscribe((payload) => this.receiveAgentStream(payload));
+      this.streams.set(agentId, unsubscribe);
+    } catch {
+      // Stream subscriptions are best-effort; usage stays empty until events arrive.
+    }
+  }
+
+  private receiveAgentStream(payload: ObservatoryAgentStreamPayload): void {
+    if (!this.active || !this.agents.has(payload.agentId)) return;
+    const event = payload.event;
+    const model = this.agentModels.get(payload.agentId) ?? null;
+    const usageEvent = toUsageEvent(event);
+    if (event.type === "model_changed") {
+      const nextModel = event.runtimeInfo?.model ?? null;
+      if (nextModel !== null) this.agentModels.set(payload.agentId, nextModel);
+      return;
+    }
+    if (!usageEvent) return;
+    this.usage.set(
+      payload.agentId,
+      reduceAgentUsage(this.usage.get(payload.agentId) ?? emptyAgentUsage(), usageEvent, model),
+    );
+    this.publishReady();
+  }
+
   private publishReady(): void {
     if (!this.project || this.workspaces.size === 0) return;
     this.publish({
@@ -216,7 +311,10 @@ export class ProjectObservationController {
       view: createProjectObservation(
         this.project,
         [...this.workspaces.values()],
-        [...this.agents.values()],
+        [...this.agents.values()].map((agent) => ({
+          ...agent,
+          usage: this.usage.get(agent.id) ?? emptyAgentUsage(),
+        })),
       ),
     });
   }
@@ -253,5 +351,16 @@ function toAgent(agent: PaseoAgent): ObservatoryAgentSnapshot {
     updatedAt: agent.updatedAt,
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,
+    model: agent.model ?? null,
   };
+}
+
+function toUsageEvent(event: ObservatoryAgentStreamEvent): AgentUsageEvent | null {
+  if (event.type === "usage_updated") {
+    return { kind: "provisional", turnId: event.turnId, usage: event.usage };
+  }
+  if (event.type === "turn_completed") {
+    return { kind: "final", turnId: event.turnId, usage: event.usage };
+  }
+  return null;
 }
