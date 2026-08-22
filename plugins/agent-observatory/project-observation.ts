@@ -107,7 +107,7 @@ export class ProjectObservationController {
     try {
       const page = await this.paseo.agents.ref(agentId).timeline.refetch({ limit: TIMELINE_DETAIL_LIMIT, ...(older && current.cursor ? { cursor: current.cursor } : {}), direction: "backward" });
       const entries = (page.entries ?? []).map(normalizeTimelineEntry);
-      this.timelines.set(agentId, { entries: older ? [...current.entries, ...entries].slice(-50) : entries.slice(0, 50), cursor: page.pageInfo?.cursor, hasOlder: page.pageInfo?.hasOlder ?? false, loading: false });
+      this.timelines.set(agentId, { entries: older ? [...current.entries, ...entries] : entries.slice(0, 50), cursor: page.pageInfo?.cursor, hasOlder: page.pageInfo?.hasOlder ?? false, loading: false });
     } catch (error) { this.timelines.set(agentId, { ...current, loading: false, error: error instanceof Error ? error.message : String(error) }); }
     this.publishReady();
   }
@@ -116,7 +116,10 @@ export class ProjectObservationController {
       const page = await this.paseo.agents.ref(agentId).timeline.refetch({ limit: TIMELINE_SUMMARY_LIMIT, direction: "backward" });
       this.timelines.set(agentId, { entries: (page.entries ?? []).map(normalizeTimelineEntry), cursor: page.pageInfo?.cursor, hasOlder: page.pageInfo?.hasOlder ?? false, loading: false });
       this.publishReady();
-    } catch { /* Summary data is optional; directory data remains usable. */ }
+    } catch (error) {
+      this.timelines.set(agentId, { entries: [], hasOlder: false, loading: false, error: error instanceof Error ? error.message : String(error) });
+      this.publishReady();
+    }
   }
 
   private receiveWorkspace(
