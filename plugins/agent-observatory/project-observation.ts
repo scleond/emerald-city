@@ -391,8 +391,8 @@ function toAgent(agent: PaseoAgent): ObservatoryAgentSnapshot {
     updatedAt: agent.updatedAt,
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,
-    attentionTimestamp: (agent as any).attentionTimestamp ?? null,
-    pendingPermissions: (agent as any).pendingPermissions?.length ?? 0,
+    attentionTimestamp: (agent as unknown as { attentionTimestamp?: string | null }).attentionTimestamp ?? null,
+    pendingPermissions: (agent as unknown as { pendingPermissions?: unknown[] }).pendingPermissions?.length ?? 0,
     model: agent.model ?? null,
     labels: agent.labels,
   };
@@ -407,6 +407,7 @@ function toUsageEvent(event: ObservatoryAgentStreamEvent): AgentUsageEvent | nul
   }
   return null;
 }
+
 
 
 

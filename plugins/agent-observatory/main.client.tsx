@@ -348,6 +348,7 @@ function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, ti
         ))}
       </View>
       <AttentionQueue attention={attention} titles={titles} styles={styles} selectAgent={selectAgent} />
+      {view.models.length > 0 ? (<View><Text accessibilityRole="header" style={styles.sectionTitle}>Usage by model</Text>{view.models.map((bar) => (<ModelBar key={bar.model} bar={bar} styles={styles} />))}</View>) : null}
       <Text accessibilityRole="header" style={styles.sectionTitle}>
         Workspaces
       </Text>
@@ -517,4 +518,5 @@ function TurnColumn({ turn, styles }: { turn: ObservatoryAgentUsageTurn; styles:
     </View>
   );
 }
+
 
