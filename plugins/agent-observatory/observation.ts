@@ -1,8 +1,15 @@
 export type AgentLifecycle = "active" | "waiting" | "finished" | "failed" | "other";
 
-export interface ObservatoryWorkspace {
+export interface ObservatoryProject {
   id: string;
   name: string;
+}
+
+export interface ObservatoryWorkspaceSnapshot {
+  id: string;
+  projectId: string;
+  name: string;
+  archivingAt: string | null;
 }
 
 export interface ObservatoryAgentSnapshot {
@@ -17,10 +24,17 @@ export interface ObservatoryAgentSnapshot {
 
 export interface ObservatoryAgentView {
   id: string;
+  workspaceId: string;
   title: string;
   status: string;
   lifecycle: AgentLifecycle;
   updatedAt: string;
+}
+
+export interface ObservatoryWorkspaceView {
+  id: string;
+  name: string;
+  agents: ObservatoryAgentView[];
 }
 
 export interface LifecycleCount {
@@ -29,37 +43,49 @@ export interface LifecycleCount {
 }
 
 export interface ObservatoryViewModel {
-  workspace: ObservatoryWorkspace;
+  project: ObservatoryProject;
   counts: LifecycleCount[];
-  agents: ObservatoryAgentView[];
+  workspaces: ObservatoryWorkspaceView[];
 }
 
 const lifecycleOrder: AgentLifecycle[] = ["active", "waiting", "failed", "finished", "other"];
 
-export function createWorkspaceObservation(
-  workspace: ObservatoryWorkspace,
-  snapshots: readonly ObservatoryAgentSnapshot[],
+export function createProjectObservation(
+  project: ObservatoryProject,
+  workspaceSnapshots: readonly ObservatoryWorkspaceSnapshot[],
+  agentSnapshots: readonly ObservatoryAgentSnapshot[],
 ): ObservatoryViewModel {
-  const agents = snapshots
-    .filter((agent) => agent.workspaceId === workspace.id)
-    .map((agent) => ({
-      id: agent.id,
-      title: agent.title?.trim() || agent.id,
-      status: agent.status,
-      lifecycle: lifecycleFor(agent),
-      updatedAt: agent.updatedAt,
-    }))
-    .sort((left, right) => {
-      const lifecycleDifference =
-        lifecycleOrder.indexOf(left.lifecycle) - lifecycleOrder.indexOf(right.lifecycle);
-      return lifecycleDifference || left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
-    });
+  const activeWorkspaces = workspaceSnapshots
+    .filter((workspace) => workspace.projectId === project.id && workspace.archivingAt === null)
+    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+  const workspaceIds = new Set(activeWorkspaces.map((workspace) => workspace.id));
+  const agentsByWorkspace = new Map<string, ObservatoryAgentView[]>();
 
+  for (const snapshot of agentSnapshots) {
+    if (!workspaceIds.has(snapshot.workspaceId)) continue;
+    const agents = agentsByWorkspace.get(snapshot.workspaceId) ?? [];
+    agents.push({
+      id: snapshot.id,
+      workspaceId: snapshot.workspaceId,
+      title: snapshot.title?.trim() || snapshot.id,
+      status: snapshot.status,
+      lifecycle: lifecycleFor(snapshot),
+      updatedAt: snapshot.updatedAt,
+    });
+    agentsByWorkspace.set(snapshot.workspaceId, agents);
+  }
+
+  const workspaces = activeWorkspaces.map((workspace) => ({
+    id: workspace.id,
+    name: workspace.name,
+    agents: (agentsByWorkspace.get(workspace.id) ?? []).sort(compareAgents),
+  }));
+  const agents = workspaces.flatMap((workspace) => workspace.agents);
   const count = (lifecycle: AgentLifecycle) =>
     agents.reduce((total, agent) => total + Number(agent.lifecycle === lifecycle), 0);
 
   return {
-    workspace,
+    project,
     counts: [
       { label: "Active", count: count("active") },
       { label: "Waiting", count: count("waiting") },
@@ -67,8 +93,14 @@ export function createWorkspaceObservation(
       { label: "Failed", count: count("failed") },
       { label: "Other", count: count("other") },
     ],
-    agents,
+    workspaces,
   };
+}
+
+function compareAgents(left: ObservatoryAgentView, right: ObservatoryAgentView): number {
+  const lifecycleDifference =
+    lifecycleOrder.indexOf(left.lifecycle) - lifecycleOrder.indexOf(right.lifecycle);
+  return lifecycleDifference || left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
 }
 
 function lifecycleFor(agent: ObservatoryAgentSnapshot): AgentLifecycle {

@@ -3,9 +3,9 @@ import React, { useEffect, useMemo, useSyncExternalStore } from "react";
 import { ScrollView, Text, View, type TextStyle, type ViewStyle } from "react-native";
 import type { ObservatoryViewModel } from "./observation";
 import {
-  WorkspaceObservationController,
-  type WorkspaceObservationState,
-} from "./workspace-observation";
+  ProjectObservationController,
+  type ProjectObservationState,
+} from "./project-observation";
 
 export function AgentObservatoryPanel({
   theme,
@@ -14,7 +14,7 @@ export function AgentObservatoryPanel({
 }: PluginWorkspacePanelProps) {
   const paseo = usePaseo();
   const controller = useMemo(
-    () => new WorkspaceObservationController(paseo, workspaceId),
+    () => new ProjectObservationController(paseo, workspaceId),
     [paseo, workspaceId],
   );
   const state = useSyncExternalStore(
@@ -70,6 +70,14 @@ export function AgentObservatoryPanel({
         gap: 3,
         paddingVertical: layout.compact ? 8 : 10,
       },
+      workspace: {
+        gap: layout.compact ? 4 : 6,
+      },
+      workspaceTitle: {
+        color: theme.colors.foreground,
+        fontSize: 15,
+        fontWeight: "600" as const,
+      },
       agentTitle: {
         color: theme.colors.foreground,
         fontSize: 15,
@@ -107,14 +115,16 @@ interface PanelStyles {
   label: TextStyle;
   sectionTitle: TextStyle;
   row: ViewStyle;
+  workspace: ViewStyle;
+  workspaceTitle: TextStyle;
   agentTitle: TextStyle;
   status: TextStyle;
   error: TextStyle;
 }
 
-function StateContent({ state, styles }: { state: WorkspaceObservationState; styles: PanelStyles }) {
+function StateContent({ state, styles }: { state: ProjectObservationState; styles: PanelStyles }) {
   if (state.phase === "loading") {
-    return <Text style={styles.subtitle}>Loading workspace agents…</Text>;
+    return <Text style={styles.subtitle}>Loading project agents…</Text>;
   }
   if (state.phase === "disconnected") {
     return (
@@ -136,9 +146,10 @@ function StateContent({ state, styles }: { state: WorkspaceObservationState; sty
 }
 
 function ReadyContent({ view, styles }: { view: ObservatoryViewModel; styles: PanelStyles }) {
+  const agentCount = view.workspaces.reduce((total, workspace) => total + workspace.agents.length, 0);
   return (
     <>
-      <Text style={styles.subtitle}>{view.workspace.name}</Text>
+      <Text style={styles.subtitle}>{view.project.name}</Text>
       <View accessibilityLabel="Agent lifecycle summary" style={styles.summary}>
         {view.counts.map(({ label, count }) => (
           <View key={label} accessibilityLabel={`${label}: ${count}`}>
@@ -148,20 +159,34 @@ function ReadyContent({ view, styles }: { view: ObservatoryViewModel; styles: Pa
         ))}
       </View>
       <Text accessibilityRole="header" style={styles.sectionTitle}>
-        Agents
+        Workspaces
       </Text>
-      {view.agents.length === 0 ? (
-        <Text style={styles.subtitle}>No agents are currently available in this workspace.</Text>
-      ) : (
-        view.agents.map((agent) => (
-          <View key={agent.id} accessibilityLabel={`${agent.title}, status ${agent.status}`} style={styles.row}>
-            <Text style={styles.agentTitle}>{agent.title}</Text>
-            <Text style={styles.status}>
-              {agent.lifecycle === "other" ? `Other · ${agent.status}` : agent.status}
-            </Text>
-          </View>
-        ))
-      )}
+      {agentCount === 0 ? (
+        <Text style={styles.subtitle}>No agents are currently available in this project.</Text>
+      ) : null}
+      {view.workspaces.map((workspace) => (
+        <View key={workspace.id} style={styles.workspace}>
+          <Text accessibilityRole="header" style={styles.workspaceTitle}>
+            {workspace.name}
+          </Text>
+          {workspace.agents.length === 0 ? (
+            <Text style={styles.subtitle}>No agents</Text>
+          ) : (
+            workspace.agents.map((agent) => (
+              <View
+                key={agent.id}
+                accessibilityLabel={`${agent.title}, status ${agent.status}`}
+                style={styles.row}
+              >
+                <Text style={styles.agentTitle}>{agent.title}</Text>
+                <Text style={styles.status}>
+                  {agent.lifecycle === "other" ? `Other · ${agent.status}` : agent.status}
+                </Text>
+              </View>
+            ))
+          )}
+        </View>
+      ))}
     </>
   );
 }

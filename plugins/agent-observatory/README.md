@@ -1,8 +1,10 @@
 # Agent Observatory
 
-Agent Observatory is a native Paseo workspace panel. It shows live lifecycle counts and a basic
-agent list for the workspace that opened it. Workspace and agent changes arrive through Paseo's
-host-supplied SDK connection; the plugin does not open another connection or run a web server.
+Agent Observatory is a project-scoped view hosted in a native Paseo workspace panel. It shows live
+lifecycle counts and groups agents under every active workspace in the project that opened it.
+Archiving the opening workspace does not close the project view while another active workspace
+remains. Workspace and agent changes arrive through Paseo's host-supplied SDK connection; the
+plugin does not open another connection or run a web server.
 
 ## Develop
 
@@ -27,6 +29,6 @@ paseo plugin install /absolute/path/to/emerald-city/plugins/agent-observatory
 paseo plugin ls
 ```
 
-In a workspace, open the Command Center and choose **Open Agent Observatory**. Paseo opens the
-workspace-scoped panel. Source changes require `paseo plugin reload agent-observatory` after a
-successful typecheck.
+In any active workspace, open the Command Center and choose **Open Agent Observatory**. Paseo opens
+the panel for that workspace's project. Source changes require
+`paseo plugin reload agent-observatory` after a successful typecheck.

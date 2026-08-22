@@ -1,18 +1,15 @@
-import type {
-  PaseoAgent,
-  PaseoApi,
-  PaseoWorkspace,
-} from "@getpaseo/client";
+import type { PaseoAgent, PaseoApi, PaseoWorkspace } from "@getpaseo/client";
 import {
-  createWorkspaceObservation,
+  createProjectObservation,
   type ObservatoryAgentSnapshot,
+  type ObservatoryProject,
   type ObservatoryViewModel,
-  type ObservatoryWorkspace,
+  type ObservatoryWorkspaceSnapshot,
 } from "./observation";
 
 export type ObservatoryPaseoApi = Pick<PaseoApi, "workspaces" | "agents">;
 
-export type WorkspaceObservationState =
+export type ProjectObservationState =
   | { phase: "loading" }
   | { phase: "ready"; view: ObservatoryViewModel }
   | { phase: "disconnected"; message: string }
@@ -25,11 +22,12 @@ interface TimerApi {
 
 const refreshIntervalMs = 15_000;
 
-export class WorkspaceObservationController {
-  private state: WorkspaceObservationState = { phase: "loading" };
+export class ProjectObservationController {
+  private state: ProjectObservationState = { phase: "loading" };
   private readonly listeners = new Set<() => void>();
+  private readonly workspaces = new Map<string, ObservatoryWorkspaceSnapshot>();
   private readonly agents = new Map<string, ObservatoryAgentSnapshot>();
-  private workspace: ObservatoryWorkspace | null = null;
+  private project: ObservatoryProject | null = null;
   private unsubscribeWorkspace: (() => void) | null = null;
   private unsubscribeAgent: (() => void) | null = null;
   private timer: unknown = null;
@@ -39,14 +37,14 @@ export class WorkspaceObservationController {
 
   constructor(
     private readonly paseo: ObservatoryPaseoApi,
-    private readonly workspaceId: string,
+    private readonly openingWorkspaceId: string,
     private readonly timers: TimerApi = {
       setInterval: (callback, milliseconds) => globalThis.setInterval(callback, milliseconds),
       clearInterval: (handle) => globalThis.clearInterval(handle as ReturnType<typeof setInterval>),
     },
   ) {}
 
-  getSnapshot = (): WorkspaceObservationState => this.state;
+  getSnapshot = (): ProjectObservationState => this.state;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -58,25 +56,18 @@ export class WorkspaceObservationController {
     this.active = true;
     this.unsubscribeWorkspace = this.paseo.workspaces.subscribe((update) => {
       if (!this.active) return;
-      if (update.kind === "upsert" && update.workspace.id === this.workspaceId) {
-        this.workspace = toWorkspace(update.workspace);
-        this.publishReady();
-      } else if (update.kind === "remove" && update.id === this.workspaceId) {
-        this.workspace = null;
-        this.publish({
-          phase: "unavailable",
-          message: "The selected workspace is unavailable on this host.",
-        });
+      if (update.kind === "upsert") {
+        this.receiveWorkspace(toWorkspace(update.workspace), toProject(update.workspace));
+      } else {
+        this.removeWorkspace(update.id);
       }
     });
     this.unsubscribeAgent = this.paseo.agents.subscribe((update) => {
       if (!this.active) return;
-      if (update.kind === "upsert") {
-        if (update.agent.workspaceId === this.workspaceId) {
-          this.agents.set(update.agent.id, toAgent(update.agent));
-        } else {
-          this.agents.delete(update.agent.id);
-        }
+      if (update.kind === "upsert" && this.workspaces.has(update.agent.workspaceId ?? "")) {
+        this.agents.set(update.agent.id, toAgent(update.agent));
+      } else if (update.kind === "upsert") {
+        this.agents.delete(update.agent.id);
       } else {
         this.agents.delete(update.agentId);
       }
@@ -102,26 +93,72 @@ export class WorkspaceObservationController {
     }
   }
 
+  private receiveWorkspace(
+    workspace: ObservatoryWorkspaceSnapshot,
+    project: ObservatoryProject,
+  ): void {
+    if (!this.project && workspace.id === this.openingWorkspaceId) this.project = project;
+    if (!this.project || workspace.projectId !== this.project.id || workspace.archivingAt !== null) {
+      this.removeWorkspace(workspace.id);
+      return;
+    }
+    this.project = project;
+    this.workspaces.set(workspace.id, workspace);
+    this.publishReady();
+  }
+
+  private removeWorkspace(workspaceId: string): void {
+    this.workspaces.delete(workspaceId);
+    for (const [agentId, agent] of this.agents) {
+      if (agent.workspaceId === workspaceId) this.agents.delete(agentId);
+    }
+    if (this.workspaces.size === 0 && this.project) {
+      this.publish({
+        phase: "unavailable",
+        message: "This project has no active workspaces on the selected host.",
+      });
+    } else {
+      this.publishReady();
+    }
+  }
+
   private async refresh(subscribe: boolean): Promise<void> {
     if (this.refreshing || !this.active) return;
     this.refreshing = true;
     const shouldSubscribe = subscribe || !this.directorySubscriptionsActive;
     try {
+      if (!this.project) {
+        const openingWorkspace = await this.paseo.workspaces
+          .ref(this.openingWorkspaceId)
+          .refresh();
+        if (!openingWorkspace || openingWorkspace.archivingAt != null) {
+          this.publish({
+            phase: "unavailable",
+            message: "The opening workspace is unavailable on this host.",
+          });
+          return;
+        }
+        this.project = toProject(openingWorkspace);
+      }
+
       const [workspaces, agents] = await Promise.all([
-        this.listAllWorkspaces(shouldSubscribe),
+        this.listProjectWorkspaces(this.project.id, shouldSubscribe),
         this.listAllAgents(shouldSubscribe),
       ]);
       if (!this.active) return;
       this.directorySubscriptionsActive = true;
-      this.workspace = workspaces.find((workspace) => workspace.id === this.workspaceId) ?? null;
+      this.workspaces.clear();
+      for (const workspace of workspaces) {
+        if (workspace.archivingAt === null) this.workspaces.set(workspace.id, workspace);
+      }
       this.agents.clear();
       for (const agent of agents) {
-        if (agent.workspaceId === this.workspaceId) this.agents.set(agent.id, agent);
+        if (this.workspaces.has(agent.workspaceId)) this.agents.set(agent.id, agent);
       }
-      if (!this.workspace) {
+      if (this.workspaces.size === 0) {
         this.publish({
           phase: "unavailable",
-          message: "The selected workspace is unavailable on this host.",
+          message: "This project has no active workspaces on the selected host.",
         });
       } else {
         this.publishReady();
@@ -140,11 +177,15 @@ export class WorkspaceObservationController {
     }
   }
 
-  private async listAllWorkspaces(subscribe: boolean): Promise<ObservatoryWorkspace[]> {
-    const entries: ObservatoryWorkspace[] = [];
+  private async listProjectWorkspaces(
+    projectId: string,
+    subscribe: boolean,
+  ): Promise<ObservatoryWorkspaceSnapshot[]> {
+    const entries: ObservatoryWorkspaceSnapshot[] = [];
     let cursor: string | undefined;
     do {
       const page = await this.paseo.workspaces.list({
+        filter: { projectId },
         page: { limit: 200, ...(cursor ? { cursor } : {}) },
         ...(subscribe && !cursor ? { subscribe: {} } : {}),
       });
@@ -169,14 +210,18 @@ export class WorkspaceObservationController {
   }
 
   private publishReady(): void {
-    if (!this.workspace) return;
+    if (!this.project || this.workspaces.size === 0) return;
     this.publish({
       phase: "ready",
-      view: createWorkspaceObservation(this.workspace, [...this.agents.values()]),
+      view: createProjectObservation(
+        this.project,
+        [...this.workspaces.values()],
+        [...this.agents.values()],
+      ),
     });
   }
 
-  private publish(state: WorkspaceObservationState): void {
+  private publish(state: ProjectObservationState): void {
     this.state = state;
     for (const listener of this.listeners) listener();
   }
@@ -186,8 +231,17 @@ function looksDisconnected(message: string): boolean {
   return /disconnect|offline|websocket|socket|connection (?:closed|lost|failed)/i.test(message);
 }
 
-function toWorkspace(workspace: PaseoWorkspace): ObservatoryWorkspace {
-  return { id: workspace.id, name: workspace.name };
+function toProject(workspace: PaseoWorkspace): ObservatoryProject {
+  return { id: workspace.projectId, name: workspace.projectDisplayName };
+}
+
+function toWorkspace(workspace: PaseoWorkspace): ObservatoryWorkspaceSnapshot {
+  return {
+    id: workspace.id,
+    projectId: workspace.projectId,
+    name: workspace.name,
+    archivingAt: workspace.archivingAt ?? null,
+  };
 }
 
 function toAgent(agent: PaseoAgent): ObservatoryAgentSnapshot {

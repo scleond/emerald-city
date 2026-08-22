@@ -3,20 +3,20 @@ import { AgentObservatoryPanel } from "./main.client";
 
 export default function contribute(plugin: PluginContext) {
   plugin.addWorkspacePanel({
-    id: "workspace-observatory",
+    id: "project-observatory",
     title: "Agent Observatory",
     icon: "Telescope",
     context: "workspace",
     Component: AgentObservatoryPanel,
   });
   plugin.addCommandCenterItem({
-    id: "open-workspace-observatory",
+    id: "open-project-observatory",
     title: "Open Agent Observatory",
     icon: "Telescope",
-    keywords: ["agents", "status", "workspace"],
+    keywords: ["agents", "status", "project", "workspace"],
     context: "workspace",
     onSelect({ openPanel }) {
-      openPanel("workspace-observatory");
+      openPanel("project-observatory");
     },
   });
   return () => {};
