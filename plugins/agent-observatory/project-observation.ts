@@ -14,6 +14,13 @@ import {
   type ObservatoryUsageFields,
 } from "./observation";
 import { normalizeTimelineEntry, TIMELINE_DETAIL_LIMIT, TIMELINE_SUMMARY_LIMIT, type AgentLifecycle, type NormalizedTimelineEntry, type RawTimelineEntry } from "./observation";
+import type { AttentionDismissalRecord } from "./dismissals";
+
+export interface ObservatoryDismissalApi {
+  get(projectId: string): Promise<readonly AttentionDismissalRecord[]>;
+  put(projectId: string, dismissal: AttentionDismissalRecord): Promise<readonly AttentionDismissalRecord[]>;
+  removeAgents(projectId: string, agentIds: readonly string[]): Promise<readonly AttentionDismissalRecord[]>;
+}
 
 export interface ObservatoryAgentStreamEvent {
   type: string;
@@ -35,7 +42,7 @@ export type ObservatoryPaseoApi = Omit<Pick<PaseoApi, "workspaces" | "agents">, 
 
 export type ProjectObservationState =
   | { phase: "loading" }
-  | { phase: "ready"; view: ObservatoryViewModel; attention: AttentionEntry[]; timeline?: Record<string, TimelineState> }
+  | { phase: "ready"; view: ObservatoryViewModel; attention: AttentionEntry[]; timeline?: Record<string, TimelineState>; dismissalError?: string }
   | { phase: "disconnected"; message: string }
   | { phase: "unavailable"; message: string };
 
@@ -65,6 +72,9 @@ export class ProjectObservationController {
   private readonly timelines = new Map<string, TimelineState>();
   private query = "";
   private lifecycles: AgentLifecycle[] = [];
+  private dismissals: AttentionDismissalRecord[] = [];
+  private dismissalError?: string;
+  private readonly dismissalApi?: ObservatoryDismissalApi;
 
   constructor(
     private readonly paseo: ObservatoryPaseoApi,
@@ -74,7 +84,10 @@ export class ProjectObservationController {
       clearInterval: (handle) => globalThis.clearInterval(handle as ReturnType<typeof setInterval>),
     },
     private readonly now: () => number = () => Date.now(),
-  ) {}
+    dismissalApi?: ObservatoryDismissalApi,
+  ) {
+    this.dismissalApi = dismissalApi;
+  }
 
   getSnapshot = (): ProjectObservationState => this.state;
 
@@ -100,9 +113,9 @@ export class ProjectObservationController {
       if (update.kind === "upsert" && this.workspaces.has(update.agent.workspaceId ?? "")) {
         this.trackAgent(update.agent.id, toAgent(update.agent));
       } else if (update.kind === "upsert") {
-        this.removeAgent(update.agent.id);
+        this.removeAgent(update.agent.id, false);
       } else {
-        this.removeAgent(update.agentId);
+        this.removeAgent(update.agentId, true);
       }
       this.publishReady();
     });
@@ -169,7 +182,7 @@ export class ProjectObservationController {
   private removeWorkspace(workspaceId: string): void {
     this.workspaces.delete(workspaceId);
     for (const [agentId, agent] of this.agents) {
-      if (agent.workspaceId === workspaceId) this.removeAgent(agentId);
+      if (agent.workspaceId === workspaceId) this.removeAgent(agentId, false);
     }
     if (this.workspaces.size === 0 && this.project) {
       this.publish({
@@ -226,6 +239,11 @@ export class ProjectObservationController {
           unsubscribe();
           this.streams.delete(id);
         }
+      }
+      try {
+        await this.syncDismissals();
+      } catch {
+        // syncDismissals handles its own error state; keep ready phase
       }
       for (const agent of this.agents.values()) void this.loadTimelineSummary(agent.id);
       if (this.workspaces.size === 0) {
@@ -291,7 +309,7 @@ export class ProjectObservationController {
     this.subscribeAgentStream(agentId);
   }
 
-  private removeAgent(agentId: string): void {
+  private removeAgent(agentId: string, isExplicitRemoval = false): void {
     this.agents.delete(agentId);
     this.usage.delete(agentId);
     this.agentModels.delete(agentId);
@@ -299,6 +317,45 @@ export class ProjectObservationController {
     if (unsubscribe) {
       unsubscribe();
       this.streams.delete(agentId);
+    }
+    if (isExplicitRemoval && this.dismissalApi && this.project) {
+      void this.dismissalApi.removeAgents(this.project.id, [agentId]).catch(() => {});
+    }
+  }
+
+  async syncDismissals(): Promise<void> {
+    if (!this.project || !this.dismissalApi) return;
+    try {
+      this.dismissals = [...(await this.dismissalApi.get(this.project.id))];
+      this.dismissalError = undefined;
+    } catch (error) {
+      this.dismissalError = error instanceof Error ? error.message : String(error);
+    }
+    this.publishReady();
+  }
+
+  async dismissAttention(entry: AttentionEntry): Promise<void> {
+    if (!this.project || !this.dismissalApi) return;
+    const record: AttentionDismissalRecord = {
+      agentId: entry.agentId,
+      episodeId: entry.episodeId,
+      reason: entry.reason,
+      workspaceId: entry.workspaceId,
+      dismissedAt: new Date().toISOString(),
+    };
+    // Optimistic update
+    this.dismissals = [...this.dismissals.filter((r) => !(r.agentId === record.agentId && r.episodeId === record.episodeId)), record];
+    this.publishReady();
+    try {
+      const updated = await this.dismissalApi.put(this.project.id, record);
+      this.dismissals = [...updated];
+      this.dismissalError = undefined;
+    } catch (error) {
+      this.dismissalError = error instanceof Error ? error.message : String(error);
+      await this.syncDismissals();
+      return;
+    } finally {
+      this.publishReady();
     }
   }
 
@@ -334,6 +391,7 @@ export class ProjectObservationController {
 
   private publishReady(): void {
     if (!this.project || this.workspaces.size === 0) return;
+    const dismissedSet = new Set(this.dismissals.map((r) => r.episodeId));
     this.publish({
       phase: "ready",
       view: createProjectObservation(
@@ -353,8 +411,10 @@ export class ProjectObservationController {
           timeline: this.timelines.get(agent.id)?.entries,
         })),
         now: this.now(),
+        dismissed: dismissedSet,
       }),
       timeline: Object.fromEntries(this.timelines),
+      ...(this.dismissalError ? { dismissalError: this.dismissalError } : {}),
     });
   }
 

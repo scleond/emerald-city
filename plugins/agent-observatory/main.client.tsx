@@ -1,4 +1,4 @@
-import { type PluginWorkspacePanelProps, usePaseo } from "@getpaseo/plugin";
+import { type PluginWorkspacePanelProps, usePaseo, useRpc } from "@getpaseo/plugin";
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Pressable, ScrollView, Text, TextInput, View, type TextStyle, type ViewStyle } from "react-native";
 import { ATTENTION_REASON_LABELS, type AgentLifecycle, type AttentionEntry, type AttentionReasonKind, type ModelUsageBar, type ObservatoryAgentUsageTurn } from "./observation";
@@ -7,6 +7,7 @@ import {
   ProjectObservationController,
   type ProjectObservationState,
 } from "./project-observation";
+import { observatoryDismissalContracts, type AttentionDismissalRecord } from "./dismissals";
 
 export function AgentObservatoryPanel({
   theme,
@@ -14,9 +15,29 @@ export function AgentObservatoryPanel({
   workspaceId,
 }: PluginWorkspacePanelProps) {
   const paseo = usePaseo();
+  const getDismissals = useRpc(observatoryDismissalContracts.get);
+  const putDismissal = useRpc(observatoryDismissalContracts.put);
+  const removeAgentsDismissal = useRpc(observatoryDismissalContracts.removeAgents);
+  const dismissalApi = useMemo(
+    () => ({
+      get: async (projectId: string) => {
+        const result = await getDismissals({ projectId });
+        return result.dismissals;
+      },
+      put: async (projectId: string, dismissal: AttentionDismissalRecord) => {
+        const result = await putDismissal({ projectId, dismissal });
+        return result.dismissals;
+      },
+      removeAgents: async (projectId: string, agentIds: readonly string[]) => {
+        const result = await removeAgentsDismissal({ projectId, agentIds: [...agentIds] });
+        return result.dismissals;
+      },
+    }),
+    [getDismissals, putDismissal, removeAgentsDismissal],
+  );
   const controller = useMemo(
-    () => new ProjectObservationController(paseo, workspaceId),
-    [paseo, workspaceId],
+    () => new ProjectObservationController(paseo, workspaceId, undefined, undefined, dismissalApi),
+    [paseo, workspaceId, dismissalApi],
   );
   const state = useSyncExternalStore(
     controller.subscribe,
@@ -232,7 +253,7 @@ export function AgentObservatoryPanel({
       </Text>
       <TextInput placeholder="Search workspaces or agents" value={query} onChangeText={setQuery} style={{ color: theme.colors.foreground, borderWidth: 1, padding: 8 }} />
       <View style={styles.summary}>{(["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(value => <Pressable key={value} onPress={() => setLifecycle(lifecycle === value ? undefined : value)}><Text style={styles.label}>{value}</Text></Pressable>)}</View>
-      <StateContent state={state} styles={styles} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} />
+      <StateContent state={state} styles={styles} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} />
     </ScrollView>
   );
 }
@@ -285,7 +306,7 @@ const ATTENTION_REASON_STYLES: Record<AttentionReasonKind, keyof PanelStyles> = 
   inactivity: "reasonInactivity",
 };
 
-function AttentionQueue({ attention, titles, styles, selectAgent }: { attention: AttentionEntry[]; titles: Map<string, string>; styles: PanelStyles; selectAgent: (id: string) => void }) {
+function AttentionQueue({ attention, titles, styles, selectAgent, onDismiss }: { attention: AttentionEntry[]; titles: Map<string, string>; styles: PanelStyles; selectAgent: (id: string) => void; onDismiss: (entry: AttentionEntry) => void }) {
   if (attention.length === 0) return null;
   return (
     <View accessibilityLabel="Project attention queue">
@@ -294,7 +315,7 @@ function AttentionQueue({ attention, titles, styles, selectAgent }: { attention:
       </Text>
       {attention.map((entry) => (
         <Pressable
-          key={`${entry.agentId}-${entry.reason}`}
+          key={`${entry.agentId}-${entry.episodeId}`}
           onPress={() => selectAgent(entry.agentId)}
           accessibilityLabel={`${ATTENTION_REASON_LABELS[entry.reason]}: ${titles.get(entry.agentId) ?? entry.agentId} in ${entry.workspaceName}`}
           style={styles.attentionRow}
@@ -304,13 +325,20 @@ function AttentionQueue({ attention, titles, styles, selectAgent }: { attention:
             <Text style={styles.workspaceBadge}>{entry.workspaceName}</Text>
           </View>
           <Text style={styles.agentTitle}>{titles.get(entry.agentId) ?? entry.agentId}</Text>
+          <Pressable
+            onPress={() => onDismiss(entry)}
+            accessibilityLabel={`Dismiss ${ATTENTION_REASON_LABELS[entry.reason]} for ${titles.get(entry.agentId) ?? entry.agentId}`}
+            style={{ alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: "#e5e7eb" }}
+          >
+            <Text style={{ color: "#374151", fontSize: 12, fontWeight: "600" }}>Dismiss</Text>
+          </Pressable>
         </Pressable>
       ))}
     </View>
   );
 }
 
-function StateContent({ state, styles, selectedAgentId, selectAgent, loadMore }: { state: ProjectObservationState; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void }) {
+function StateContent({ state, styles, selectedAgentId, selectAgent, loadMore, onDismiss }: { state: ProjectObservationState; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; onDismiss: (entry: AttentionEntry) => void }) {
   if (state.phase === "loading") {
     return <Text style={styles.subtitle}>Loading project agents…</Text>;
   }
@@ -330,10 +358,10 @@ function StateContent({ state, styles, selectedAgentId, selectAgent, loadMore }:
       </View>
     );
   }
-  return <ReadyContent view={state.view} styles={styles} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} />;
+  return <ReadyContent view={state.view} styles={styles} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} onDismiss={onDismiss} />;
 }
 
-function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, timeline, attention }: { view: ObservatoryViewModel; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[] }) {
+function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, timeline, attention, onDismiss }: { view: ObservatoryViewModel; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[]; onDismiss: (entry: AttentionEntry) => void }) {
   const agentCount = view.workspaces.reduce((total, workspace) => total + workspace.agents.length, 0);
   const titles = new Map(view.workspaces.flatMap((workspace) => workspace.agents.map((agent) => [agent.id, agent.title] as const)));
   return (
@@ -347,7 +375,7 @@ function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, ti
           </View>
         ))}
       </View>
-      <AttentionQueue attention={attention} titles={titles} styles={styles} selectAgent={selectAgent} />
+      <AttentionQueue attention={attention} titles={titles} styles={styles} selectAgent={selectAgent} onDismiss={onDismiss} />
       {view.models.length > 0 ? (<View><Text accessibilityRole="header" style={styles.sectionTitle}>Usage by model</Text>{view.models.map((bar) => (<ModelBar key={bar.model} bar={bar} styles={styles} />))}</View>) : null}
       <Text accessibilityRole="header" style={styles.sectionTitle}>
         Workspaces

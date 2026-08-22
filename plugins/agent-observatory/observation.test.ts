@@ -100,7 +100,7 @@ describe("deriveAttentionQueue", () => {
       { agent: agent("stranger", "running", { workspaceId: "elsewhere" }) },
     ], BASE + ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE);
 
-    expect(entries).toEqual([
+    expect(entries).toMatchObject([
       { agentId: "feature-worker", workspaceId: "workspace-2", workspaceName: "Feature", reason: "inactivity", hintedAt: BASE + ATTENTION_INACTIVITY_THRESHOLD_MS },
       { agentId: "main-worker", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: BASE + ATTENTION_INACTIVITY_THRESHOLD_MS },
     ]);
@@ -108,7 +108,7 @@ describe("deriveAttentionQueue", () => {
 
   it("raises a user-input hint immediately and clears it when the request is answered", () => {
     const waiting = { agent: agent("asker", "running", { attentionTimestamp: new Date(BASE).toISOString(), pendingPermissions: 1 }) };
-    expect(queue([waiting], BASE)).toEqual([
+    expect(queue([waiting], BASE)).toMatchObject([
       { agentId: "asker", workspaceId: "workspace-1", workspaceName: "Main", reason: "user_input", hintedAt: BASE },
     ]);
 
@@ -142,7 +142,7 @@ describe("deriveAttentionQueue", () => {
   it("raises inactivity only after the fixed non-configurable 15 minutes without meaningful progress", () => {
     const worker = { agent: agent("worker", "running"), timeline: [entry(BASE - ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE)] };
     expect(queue([worker], BASE - ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE + ATTENTION_INACTIVITY_THRESHOLD_MS - 1)).toEqual([]);
-    expect(queue([worker], BASE - ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE + ATTENTION_INACTIVITY_THRESHOLD_MS)).toEqual([
+    expect(queue([worker], BASE - ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE + ATTENTION_INACTIVITY_THRESHOLD_MS)).toMatchObject([
       { agentId: "worker", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: BASE + MINUTE },
     ]);
   });
@@ -153,7 +153,7 @@ describe("deriveAttentionQueue", () => {
       agent: agent("beating", "running"),
       timeline: [entry(beatAt, { category: "other", label: "Heartbeat", heartbeat: true, progress: true })],
     };
-    expect(queue([progressing], BASE)).toEqual([
+    expect(queue([progressing], BASE)).toMatchObject([
       { agentId: "beating", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: beatAt + ATTENTION_INACTIVITY_THRESHOLD_MS },
     ]);
 
@@ -162,7 +162,7 @@ describe("deriveAttentionQueue", () => {
       timeline: [entry(beatAt, { category: "other", label: "Heartbeat", heartbeat: true, progress: false })],
     };
     expect(queue([silent], BASE)).toEqual([]);
-    expect(queue([silent], BASE + ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE)).toEqual([
+    expect(queue([silent], BASE + ATTENTION_INACTIVITY_THRESHOLD_MS + MINUTE)).toMatchObject([
       { agentId: "silent-beat", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: BASE + ATTENTION_INACTIVITY_THRESHOLD_MS },
     ]);
   });
@@ -179,7 +179,7 @@ describe("deriveAttentionQueue", () => {
       timeline: [entry(BASE - 10 * MINUTE, { category: "tool_activity", label: "Tool activity" }), entry(BASE - 20 * MINUTE, { category: "tool_activity", label: "Tool activity", longRunning: true })],
     };
     expect(queue([finished], BASE + 4 * MINUTE)).toEqual([]);
-    expect(queue([finished], BASE + 5 * MINUTE)).toEqual([
+    expect(queue([finished], BASE + 5 * MINUTE)).toMatchObject([
       { agentId: "builder", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: BASE - 10 * MINUTE + ATTENTION_INACTIVITY_THRESHOLD_MS },
     ]);
   });
@@ -190,7 +190,7 @@ describe("deriveAttentionQueue", () => {
     expect(queue([parent, delegated], BASE + 90 * MINUTE)).toEqual([]);
 
     const done = { agent: agent("child", "closed", { labels: { "paseo.parent-agent-id": "parent" } }) };
-    expect(queue([parent, done], BASE + 90 * MINUTE)).toEqual([
+    expect(queue([parent, done], BASE + 90 * MINUTE)).toMatchObject([
       { agentId: "parent", workspaceId: "workspace-1", workspaceName: "Main", reason: "inactivity", hintedAt: BASE + ATTENTION_INACTIVITY_THRESHOLD_MS },
     ]);
   });
@@ -204,7 +204,7 @@ describe("deriveAttentionQueue", () => {
       ],
     };
     for (let tick = BASE; tick <= BASE + 120 * MINUTE; tick += 15 * MINUTE) {
-      expect(queue([everything], tick)).toEqual([
+      expect(queue([everything], tick)).toMatchObject([
         { agentId: "needy", workspaceId: "workspace-1", workspaceName: "Main", reason: "user_input", hintedAt: BASE - MINUTE },
       ]);
     }
@@ -218,7 +218,7 @@ describe("deriveAttentionQueue", () => {
       { agent: agent("sleepy", "running"), timeline: [entry(BASE - 30 * MINUTE)] },
       { agent: agent("idle-runner", "running", { workspaceId: "workspace-2" }), timeline: [entry(BASE - 45 * MINUTE)] },
     ];
-    expect(queue(inputs, BASE)).toEqual([
+    expect(queue(inputs, BASE)).toMatchObject([
       { agentId: "late-input", workspaceId: "workspace-1", workspaceName: "Main", reason: "user_input", hintedAt: BASE - MINUTE },
       { agentId: "old-failure", workspaceId: "workspace-2", workspaceName: "Feature", reason: "failure", hintedAt: BASE - 10 * MINUTE },
       { agentId: "new-failure", workspaceId: "workspace-1", workspaceName: "Main", reason: "failure", hintedAt: BASE - 2 * MINUTE },

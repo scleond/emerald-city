@@ -205,11 +205,16 @@ export function normalizeTimelineEntry(entry: RawTimelineEntry): NormalizedTimel
 export function synthesizeAttentionEntry(agent: ObservatoryAgentSnapshot): NormalizedTimelineEntry | null { if (!agent.requiresAttention) return null; const category = agent.attentionReason === "permission" ? "permission_request" : agent.attentionReason === "finished" ? "completion" : agent.attentionReason === "error" ? "failure" : "status_change"; return { category, label: category === "permission_request" ? "Permission request" : category === "completion" ? "Completion" : category === "failure" ? "Failure" : "Status change", summary: agent.status, at: agent.updatedAt, progress: category !== "failure" }; }
 
 export type AttentionReasonKind = "user_input" | "failure" | "inactivity";
-export interface AttentionEntry { agentId: string; workspaceId: string; workspaceName: string; reason: AttentionReasonKind; hintedAt: number }
+export interface AttentionEntry { agentId: string; workspaceId: string; workspaceName: string; reason: AttentionReasonKind; hintedAt: number; episodeId: string }
 export const ATTENTION_INACTIVITY_THRESHOLD_MS = 15 * 60 * 1000;
 const ATTENTION_REASON_PRIORITY: Record<AttentionReasonKind, number> = { user_input: 0, failure: 1, inactivity: 2 };
 export const ATTENTION_REASON_LABELS: Record<AttentionReasonKind, string> = { user_input: "Waiting for you", failure: "Failed", inactivity: "Inactive" };
 export interface AttentionAgentInput { agent: ObservatoryAgentSnapshot; timeline?: readonly NormalizedTimelineEntry[] }
+
+export function attentionEpisodeId(reason: AttentionReasonKind, agentId: string, anchor: number | string): string {
+  const anchorValue = typeof anchor === "number" ? String(anchor) : String(anchor);
+  return `${reason}:${agentId}:${anchorValue}`;
+}
 
 /**
  * Derives the project attention queue deterministically from snapshots alone. `now` must be
@@ -228,25 +233,55 @@ export function deriveAttentionQueue(input: {
   workspaces: readonly ObservatoryWorkspaceSnapshot[];
   agents: readonly AttentionAgentInput[];
   now: number;
+  dismissed?: ReadonlySet<string> | readonly { episodeId: string }[];
 }): AttentionEntry[] {
   const names = new Map(input.workspaces.filter(w => w.projectId === input.project.id && w.archivingAt === null).map(w => [w.id, w.name] as const));
+  const dismissedSet = input.dismissed
+    ? input.dismissed instanceof Set
+      ? input.dismissed as ReadonlySet<string>
+      : new Set((input.dismissed as readonly { episodeId: string }[]).map((entry) => entry.episodeId))
+    : null;
   const entries: AttentionEntry[] = [];
   for (const item of input.agents) {
     if (!names.has(item.agent.workspaceId)) continue;
     const reason = deriveAttentionReason(item.agent, item.timeline ?? [], input.agents, input.now);
     if (!reason) continue;
-    entries.push({ agentId: item.agent.id, workspaceId: item.agent.workspaceId, workspaceName: names.get(item.agent.workspaceId) ?? "", reason: reason.kind, hintedAt: reason.hintedAt });
+    if (dismissedSet?.has(reason.episodeId)) continue;
+    entries.push({ agentId: item.agent.id, workspaceId: item.agent.workspaceId, workspaceName: names.get(item.agent.workspaceId) ?? "", reason: reason.kind, hintedAt: reason.hintedAt, episodeId: reason.episodeId });
   }
   return entries.sort(compareAttentionEntries);
 }
 function compareAttentionEntries(a: AttentionEntry, b: AttentionEntry): number {
   return ATTENTION_REASON_PRIORITY[a.reason] - ATTENTION_REASON_PRIORITY[b.reason] || a.hintedAt - b.hintedAt || a.agentId.localeCompare(b.agentId);
 }
-function deriveAttentionReason(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[], all: readonly AttentionAgentInput[], now: number): { kind: AttentionReasonKind; hintedAt: number } | null {
+function deriveAttentionReason(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[], all: readonly AttentionAgentInput[], now: number): { kind: AttentionReasonKind; hintedAt: number; episodeId: string } | null {
+  function deriveEpisodeId(reason: AttentionReasonKind, agent: ObservatoryAgentSnapshot, requestedAt: number | null, lastFailureAt: number | null, lastProgressAt: number | null): string {
+    if (reason === "user_input") {
+      const anchor = requestedAt ?? 0;
+      return attentionEpisodeId(reason, agent.id, anchor);
+    }
+    if (reason === "failure") {
+      if (lifecycleFor(agent) === "failed") {
+        const anchor = lastFailureAt ?? parseTime(agent.updatedAt) ?? 0;
+        return attentionEpisodeId(reason, agent.id, anchor);
+      }
+      const anchor = lastFailureAt ?? 0;
+      return attentionEpisodeId(reason, agent.id, anchor);
+    }
+    const anchor = lastProgressAt ?? parseTime(agent.createdAt) ?? parseTime(agent.updatedAt) ?? 0;
+    return attentionEpisodeId(reason, agent.id, anchor);
+  }
   const requestedAt = permissionRequestedAt(agent, timeline);
-  if (requestedAt !== null) return { kind: "user_input", hintedAt: requestedAt };
-  return failureHint(agent, timeline, now) ?? inactivityHint(agent, timeline, all, now);
+  if (requestedAt !== null) {
+    return { kind: "user_input", hintedAt: requestedAt, episodeId: deriveEpisodeId("user_input", agent, requestedAt, null, null) };
+  }
+  const failure = failureHint(agent, timeline, now);
+  if (failure) return failure;
+  const inactivity = inactivityHint(agent, timeline, all, now);
+  if (inactivity) return inactivity;
+  return null;
 }
+
 function permissionRequestedAt(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[]): number | null {
   const flagged = agent.pendingPermissions > 0 || agent.attentionReason === "permission";
   const latestRequestAt = latestTime(timeline.filter(e => e.category === "permission_request").map(e => e.at));
@@ -258,18 +293,25 @@ function permissionRequestedAt(agent: ObservatoryAgentSnapshot, timeline: readon
   }
   return parseTime(agent.attentionTimestamp) ?? latestRequestAt ?? parseTime(agent.updatedAt) ?? 0;
 }
-function failureHint(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[], now: number): { kind: "failure"; hintedAt: number } | null {
+function failureHint(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[], now: number): { kind: "failure"; hintedAt: number; episodeId: string } | null {
   const lastFailureAt = latestTime(timeline.filter(e => e.category === "failure").map(e => e.at));
-  if (lifecycleFor(agent) === "failed") return { kind: "failure", hintedAt: lastFailureAt ?? parseTime(agent.updatedAt) ?? 0 };
+  if (lifecycleFor(agent) === "failed") {
+    const anchor = lastFailureAt ?? parseTime(agent.updatedAt) ?? 0;
+    const hintedAt = anchor;
+    return { kind: "failure", hintedAt, episodeId: attentionEpisodeId("failure", agent.id, anchor) };
+  }
   if (lastFailureAt === null || lastFailureAt > now) return null;
   if (timeline.some(e => e.progress && (parseTime(e.at) ?? -Infinity) > lastFailureAt)) return null;
-  return now - lastFailureAt >= ATTENTION_INACTIVITY_THRESHOLD_MS ? { kind: "failure", hintedAt: lastFailureAt + ATTENTION_INACTIVITY_THRESHOLD_MS } : null;
+  if (now - lastFailureAt < ATTENTION_INACTIVITY_THRESHOLD_MS) return null;
+  return { kind: "failure", hintedAt: lastFailureAt + ATTENTION_INACTIVITY_THRESHOLD_MS, episodeId: attentionEpisodeId("failure", agent.id, lastFailureAt) };
 }
-function inactivityHint(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[], all: readonly AttentionAgentInput[], now: number): { kind: "inactivity"; hintedAt: number } | null {
+function inactivityHint(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[], all: readonly AttentionAgentInput[], now: number): { kind: "inactivity"; hintedAt: number; episodeId: string } | null {
   if (lifecycleFor(agent) !== "active" || inactivityPaused(agent, timeline, all)) return null;
   const lastProgressAt = latestProgressAt(agent, timeline);
   if (lastProgressAt === null || lastProgressAt > now || now - lastProgressAt < ATTENTION_INACTIVITY_THRESHOLD_MS) return null;
-  return { kind: "inactivity", hintedAt: lastProgressAt + ATTENTION_INACTIVITY_THRESHOLD_MS };
+  const hintedAt = lastProgressAt + ATTENTION_INACTIVITY_THRESHOLD_MS;
+  const anchor = lastProgressAt;
+  return { kind: "inactivity", hintedAt, episodeId: attentionEpisodeId("inactivity", agent.id, anchor) };
 }
 function latestProgressAt(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[]): number | null {
   // Inactivity measures observed progress only: heartbeats without progress and other
