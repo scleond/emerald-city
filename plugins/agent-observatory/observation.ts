@@ -282,24 +282,6 @@ function deriveAttentionReason(agent: ObservatoryAgentSnapshot, timeline: readon
   return null;
 }
 
-function deriveEpisodeId(reason: AttentionReasonKind, agent: ObservatoryAgentSnapshot, requestedAt: number | null, lastFailureAt: number | null, lastProgressAt: number | null): string {
-  if (reason === "user_input") {
-    const anchor = requestedAt ?? 0;
-    return attentionEpisodeId(reason, agent.id, anchor);
-  }
-  if (reason === "failure") {
-    // Terminal failure anchor: lastFailureAt ?? updatedAt; escalation anchor: lastFailureAt
-    if (lifecycleFor(agent) === "failed") {
-      const anchor = lastFailureAt ?? parseTime(agent.updatedAt) ?? 0;
-      return attentionEpisodeId(reason, agent.id, anchor);
-    }
-    const anchor = lastFailureAt ?? 0;
-    return attentionEpisodeId(reason, agent.id, anchor);
-  }
-  // inactivity anchor: lastProgressAt ?? createdAt ?? updatedAt
-  const anchor = lastProgressAt ?? parseTime(agent.createdAt) ?? parseTime(agent.updatedAt) ?? 0;
-  return attentionEpisodeId(reason, agent.id, anchor);
-}
 function permissionRequestedAt(agent: ObservatoryAgentSnapshot, timeline: readonly NormalizedTimelineEntry[]): number | null {
   const flagged = agent.pendingPermissions > 0 || agent.attentionReason === "permission";
   const latestRequestAt = latestTime(timeline.filter(e => e.category === "permission_request").map(e => e.at));

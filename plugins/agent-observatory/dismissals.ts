@@ -97,52 +97,6 @@ export function createDismissalStore(options: {
     return { version: 1, projects: pruned };
   }
 
-  async function loadAll(): Promise<DismissalStoreFile> {
-    let raw: string | null;
-    try {
-      raw = await options.storage.read();
-    } catch (error) {
-      throw error;
-    }
-    if (raw === null) {
-      return { version: 1, projects: {} };
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      throw new Error("Dismissal store corrupted: invalid JSON");
-    }
-    const result = DismissalStoreFileSchema.safeParse(parsed);
-    if (!result.success) {
-      throw new Error(`Dismissal store schema mismatch: ${result.error.message}`);
-    }
-    const pruned = prune(result.data);
-    // Ensure sorted even if not pruned removed anything; prune sorts.
-    return pruned;
-  }
-
-  async function ensureLoaded(): Promise<DismissalStoreFile> {
-    if (cache) return cache;
-    const loaded = await loadAll();
-    cache = loaded;
-    // If pruning removed expired entries, persist the pruned state without overwriting corrupted case (we already threw).
-    // Check if loaded differs from raw file length? We need to detect if pruning changed data; compare JSON lengths or check original raw vs pruned.
-    // To avoid extra read, we attempt to write pruned back only if it differs from what was read.
-    // We read raw again? Instead, we can check if any entries were removed due to TTL by comparing pruned projects vs parsed projects.
-    // Simpler: if we detected prune, we try to persist but failure should not block load.
-    // We need raw parsed to compare; redo logic: we have pruned, but we don't know if anything pruned. We'll check if raw file contained expired entries by checking if prune removed any.
-    // Since loadAll already pruned, we can attempt to persist if pruned is different from original parsed data.
-    // To do that, we need original parsed; we already have it as result.data. Compare quickly.
-    // For now, handle persistence of prune via checking if pruned projects differ from result.data projects in loadAll.
-    // To avoid double complexity, we handle prune persistence in loadAll after parsing: if pruned !== result.data (by JSON), write back.
-    // But we cannot easily do that inside loadAll without causing recursion. Instead, do it here: if cache was null, we loaded pruned; we should attempt to write back if pruning occurred.
-    // We'll attempt to detect and write: compare pruned vs original parsed length. However loadAll returns pruned, we lost original. So we need to handle prune write inside loadAll.
-    return cache;
-  }
-
-  // Wrap loadAll to also persist prune if needed, but we need to avoid overwrite on corrupted case.
-  // Instead, implement a dedicated load that optionally persists prune.
   async function loadAndMaybePrune(): Promise<DismissalStoreFile> {
     // Always re-read to reflect cross-client writes and external changes
     // Do not short-circuit on cache
