@@ -1,0 +1,19 @@
+{
+  "name": "agent-observatory",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@getpaseo/client": "0.5.0-beta.4",
+    "@getpaseo/plugin": "0.5.0-beta.4",
+    "@types/react": "~19.2.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6",
+    "zod": "^4.4.3"
+  }
+}
