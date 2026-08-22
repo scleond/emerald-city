@@ -4,9 +4,35 @@ import {
   createProjectObservation,
   deriveAttentionQueue,
   normalizeTimelineEntry,
+  projectDashboard,
+  reduceAgentUsage,
   type AttentionAgentInput,
   type NormalizedTimelineEntry,
+  type ObservatoryAgentUsageTurn,
 } from "./observation";
+
+describe("projectDashboard", () => {
+  it("keeps live usage out of finalized totals and reports cache and cost truthfully", () => {
+    const base = { id: "a", workspaceId: "w", title: "A", status: "running", lifecycle: "active" as const, updatedAt: "", parentId: null, parentTitle: null, parentWorkspaceId: null, depth: 0, model: "gpt-4", switchedModels: false };
+    let usage = reduceAgentUsage({ finalizedTurns: [], provisionalTurn: null }, { kind: "final", turnId: "1", model: "claude-3", usage: { inputTokens: 10, cachedInputTokens: 12, outputTokens: 5, totalCostUsd: 2 } });
+    usage = reduceAgentUsage(usage, { kind: "provisional", turnId: "2", usage: { inputTokens: 100, outputTokens: 100, totalCostUsd: 9 } });
+    const dashboard = projectDashboard([{ ...base, usageTurns: [...usage.finalizedTurns, usage.provisionalTurn!] }], [{ id: "w", name: "Main", agents: [] }]);
+    expect(dashboard).toMatchObject({ recordedTokens: 15, inputTokens: 10, cachedInputTokens: 10, freshInputTokens: 0, outputTokens: 5, reportedCostUsd: 2, costState: "complete", finalizedTurnCount: 1, workingAgentCount: 1 });
+    expect(dashboard.models).toMatchObject([{ model: "claude-3", provider: "Anthropic", totalTokens: 15 }]);
+    expect(dashboard.liveTurns).toHaveLength(1);
+  });
+
+  it("distinguishes partial and wholly unknown cost and sorts models by totals", () => {
+    const turn = (model: string, costUsd: number | null, inputTokens: number) => ({ turnId: null, model, inputTokens, cachedInputTokens: null, outputTokens: 0, costUsd, contextUsedTokens: null, contextMaxTokens: null, provisional: false });
+    const agentBase = (id: string, usageTurns: ObservatoryAgentUsageTurn[]) => ({ id, workspaceId: "w", title: id, status: "closed", lifecycle: "finished" as const, updatedAt: "", parentId: null, parentTitle: null, parentWorkspaceId: null, depth: 0, model: null, usageTurns, switchedModels: false });
+    const dashboard = projectDashboard([agentBase("a", [turn("unknown-model", null, 2), turn("known-model", 3, 1)]), agentBase("b", [turn("known-model", 4, 10)])], [{ id: "w", name: "Main", agents: [] }]);
+    expect(dashboard.costState).toBe("partial");
+    expect(dashboard.reportedCostUsd).toBe(7);
+    expect(dashboard.models.map((model) => model.model)).toEqual(["known-model", "unknown-model"]);
+    expect(dashboard.models[0]?.provider).toBeNull();
+    expect(projectDashboard([agentBase("a", [turn("x", null, 0)])], []).reportedCostUsd).toBeNull();
+  });
+});
 
 describe("createProjectObservation", () => {
   it("groups agents by active workspace and summarizes every lifecycle state", () => {
