@@ -242,6 +242,18 @@ export function AgentObservatoryPanel({
         fontSize: 12,
         marginTop: layout.compact ? 4 : 6,
       },
+      dismissButton: {
+        alignSelf: "flex-start" as const,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+        backgroundColor: theme.colors.accent,
+      },
+      dismissLabel: {
+        color: theme.colors.accentForeground,
+        fontSize: 12,
+        fontWeight: "600" as const,
+      },
     }),
     [layout.compact, theme],
   );
@@ -298,6 +310,8 @@ interface PanelStyles {
   turnStack: ViewStyle;
   provisionalLabel: TextStyle;
   detailLine: TextStyle;
+  dismissButton: ViewStyle;
+  dismissLabel: TextStyle;
 }
 
 const ATTENTION_REASON_STYLES: Record<AttentionReasonKind, keyof PanelStyles> = {
@@ -328,9 +342,9 @@ function AttentionQueue({ attention, titles, styles, selectAgent, onDismiss }: {
           <Pressable
             onPress={() => onDismiss(entry)}
             accessibilityLabel={`Dismiss ${ATTENTION_REASON_LABELS[entry.reason]} for ${titles.get(entry.agentId) ?? entry.agentId}`}
-            style={{ alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: "#e5e7eb" }}
+            style={styles.dismissButton}
           >
-            <Text style={{ color: "#374151", fontSize: 12, fontWeight: "600" }}>Dismiss</Text>
+            <Text style={styles.dismissLabel}>Dismiss</Text>
           </Pressable>
         </Pressable>
       ))}
