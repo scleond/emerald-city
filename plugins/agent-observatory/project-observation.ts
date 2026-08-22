@@ -11,6 +11,7 @@ import {
   type ObservatoryWorkspaceSnapshot,
   type ObservatoryUsageFields,
 } from "./observation";
+import { normalizeTimelineEntry, TIMELINE_DETAIL_LIMIT, TIMELINE_SUMMARY_LIMIT, type AgentLifecycle, type NormalizedTimelineEntry, type RawTimelineEntry } from "./observation";
 
 export interface ObservatoryAgentStreamEvent {
   type: string;
@@ -24,19 +25,15 @@ export interface ObservatoryAgentStreamPayload {
   event: ObservatoryAgentStreamEvent;
 }
 
-export interface ObservatoryAgentTimelineHandle {
+export interface ObservatoryAgentStreamHandle {
   subscribe(handler: (payload: ObservatoryAgentStreamPayload) => void): () => void;
 }
-
-export type ObservatoryPaseoApi = Pick<PaseoApi, "workspaces" | "agents"> & {
-  agents: Pick<PaseoApi["agents"], "list" | "subscribe"> & {
-    ref(agentId: string): { timeline: ObservatoryAgentTimelineHandle };
-  };
-};
+export interface TimelineRef extends ObservatoryAgentStreamHandle { refetch(input?: { limit?: number; cursor?: { epoch: string; seq: number }; direction?: string }): Promise<{ entries?: RawTimelineEntry[]; pageInfo?: { cursor?: { epoch: string; seq: number }; hasOlder?: boolean } }> }
+export type ObservatoryPaseoApi = Omit<Pick<PaseoApi, "workspaces" | "agents">, "agents"> & { agents: Pick<PaseoApi["agents"], "list" | "subscribe"> & { ref(agentId: string): { timeline: TimelineRef } } };
 
 export type ProjectObservationState =
   | { phase: "loading" }
-  | { phase: "ready"; view: ObservatoryViewModel }
+  | { phase: "ready"; view: ObservatoryViewModel; timeline?: Record<string, TimelineState> }
   | { phase: "disconnected"; message: string }
   | { phase: "unavailable"; message: string };
 
@@ -46,6 +43,7 @@ interface TimerApi {
 }
 
 const refreshIntervalMs = 15_000;
+export interface TimelineState { entries: NormalizedTimelineEntry[]; cursor?: { epoch: string; seq: number }; hasOlder: boolean; loading: boolean; error?: string }
 
 export class ProjectObservationController {
   private state: ProjectObservationState = { phase: "loading" };
@@ -62,6 +60,9 @@ export class ProjectObservationController {
   private active = false;
   private refreshing = false;
   private directorySubscriptionsActive = false;
+  private readonly timelines = new Map<string, TimelineState>();
+  private query = "";
+  private lifecycles: AgentLifecycle[] = [];
 
   constructor(
     private readonly paseo: ObservatoryPaseoApi,
@@ -78,6 +79,7 @@ export class ProjectObservationController {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
+  setFilters(query: string, lifecycles: AgentLifecycle[] = []): void { this.query = query; this.lifecycles = lifecycles; this.publishReady(); }
 
   async start(): Promise<void> {
     if (this.active) return;
@@ -122,6 +124,28 @@ export class ProjectObservationController {
     if (this.timer !== null) {
       this.timers.clearInterval(this.timer);
       this.timer = null;
+    }
+  }
+
+  async loadTimeline(agentId: string, older = false): Promise<void> {
+    const current = this.timelines.get(agentId) ?? { entries: [], hasOlder: true, loading: false };
+    if (current.loading || (older && !current.hasOlder)) return;
+    this.timelines.set(agentId, { ...current, loading: true, error: undefined }); this.publishReady();
+    try {
+      const page = await this.paseo.agents.ref(agentId).timeline.refetch({ limit: TIMELINE_DETAIL_LIMIT, ...(older && current.cursor ? { cursor: current.cursor } : {}), direction: "backward" });
+      const entries = (page.entries ?? []).map(normalizeTimelineEntry);
+      this.timelines.set(agentId, { entries: older ? [...current.entries, ...entries] : entries.slice(0, 50), cursor: page.pageInfo?.cursor, hasOlder: page.pageInfo?.hasOlder ?? false, loading: false });
+    } catch (error) { this.timelines.set(agentId, { ...current, loading: false, error: error instanceof Error ? error.message : String(error) }); }
+    this.publishReady();
+  }
+  async loadTimelineSummary(agentId: string): Promise<void> {
+    try {
+      const page = await this.paseo.agents.ref(agentId).timeline.refetch({ limit: TIMELINE_SUMMARY_LIMIT, direction: "backward" });
+      this.timelines.set(agentId, { entries: (page.entries ?? []).map(normalizeTimelineEntry), cursor: page.pageInfo?.cursor, hasOlder: page.pageInfo?.hasOlder ?? false, loading: false });
+      this.publishReady();
+    } catch (error) {
+      this.timelines.set(agentId, { entries: [], hasOlder: false, loading: false, error: error instanceof Error ? error.message : String(error) });
+      this.publishReady();
     }
   }
 
@@ -200,6 +224,7 @@ export class ProjectObservationController {
           this.streams.delete(id);
         }
       }
+      for (const agent of this.agents.values()) void this.loadTimelineSummary(agent.id);
       if (this.workspaces.size === 0) {
         this.publish({
           phase: "unavailable",
@@ -315,7 +340,9 @@ export class ProjectObservationController {
           ...agent,
           usage: this.usage.get(agent.id) ?? emptyAgentUsage(),
         })),
+        { query: this.query, lifecycles: this.lifecycles },
       ),
+      timeline: Object.fromEntries(this.timelines),
     });
   }
 
@@ -352,6 +379,7 @@ function toAgent(agent: PaseoAgent): ObservatoryAgentSnapshot {
     requiresAttention: agent.requiresAttention ?? false,
     attentionReason: agent.attentionReason ?? null,
     model: agent.model ?? null,
+    labels: agent.labels,
   };
 }
 

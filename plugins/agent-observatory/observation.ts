@@ -1,16 +1,7 @@
 export type AgentLifecycle = "active" | "waiting" | "finished" | "failed" | "other";
 
-export interface ObservatoryProject {
-  id: string;
-  name: string;
-}
-
-export interface ObservatoryWorkspaceSnapshot {
-  id: string;
-  projectId: string;
-  name: string;
-  archivingAt: string | null;
-}
+export interface ObservatoryProject { id: string; name: string }
+export interface ObservatoryWorkspaceSnapshot { id: string; projectId: string; name: string; archivingAt: string | null }
 
 export interface ObservatoryUsageFields {
   inputTokens?: number;
@@ -130,135 +121,72 @@ export function aggregateModelUsage(
 }
 
 export interface ObservatoryAgentSnapshot {
-  id: string;
-  workspaceId: string;
-  title: string | null;
-  status: string;
-  updatedAt: string;
-  requiresAttention: boolean;
-  attentionReason: string | null;
-  model: string | null;
-  usage?: AgentUsageRecord;
+  id: string; workspaceId: string; title: string | null; status: string; updatedAt: string;
+  requiresAttention: boolean; attentionReason: string | null; labels?: Record<string, string>;
+  model: string | null; usage?: AgentUsageRecord;
 }
-
 export interface ObservatoryAgentView {
-  id: string;
-  workspaceId: string;
-  title: string;
-  status: string;
-  lifecycle: AgentLifecycle;
-  updatedAt: string;
-  model: string | null;
-  usageTurns: ObservatoryAgentUsageTurn[];
-  switchedModels: boolean;
+  id: string; workspaceId: string; title: string; status: string; lifecycle: AgentLifecycle; updatedAt: string;
+  parentId: string | null; parentTitle: string | null; parentWorkspaceId: string | null; depth: number;
+  model: string | null; usageTurns: ObservatoryAgentUsageTurn[]; switchedModels: boolean;
 }
-
-export interface ObservatoryWorkspaceView {
-  id: string;
-  name: string;
-  agents: ObservatoryAgentView[];
-}
-
-export interface LifecycleCount {
-  label: "Active" | "Waiting" | "Finished" | "Failed" | "Other";
-  count: number;
-}
-
-export interface ObservatoryViewModel {
-  project: ObservatoryProject;
-  counts: LifecycleCount[];
-  workspaces: ObservatoryWorkspaceView[];
-  models: ModelUsageBar[];
-}
-
+export interface ObservatoryWorkspaceView { id: string; name: string; agents: ObservatoryAgentView[] }
+export interface LifecycleCount { label: "Active" | "Waiting" | "Finished" | "Failed" | "Other"; count: number }
+export interface RawTimelineEntry { item?: unknown; timestamp?: string }
+export type TimelineCategory = "message" | "tool_activity" | "status_change" | "permission_request" | "failure" | "completion" | "other";
+export interface NormalizedTimelineEntry { category: TimelineCategory; label: string; summary: string; at: string }
+export const TIMELINE_SUMMARY_LIMIT = 10;
+export const TIMELINE_DETAIL_LIMIT = 50;
+export interface ObservatoryViewModel { project: ObservatoryProject; counts: LifecycleCount[]; workspaces: ObservatoryWorkspaceView[]; models: ModelUsageBar[] }
+const parentLabel = "paseo.parent-agent-id";
 const lifecycleOrder: AgentLifecycle[] = ["active", "waiting", "failed", "finished", "other"];
 
-export function createProjectObservation(
-  project: ObservatoryProject,
-  workspaceSnapshots: readonly ObservatoryWorkspaceSnapshot[],
-  agentSnapshots: readonly ObservatoryAgentSnapshot[],
-): ObservatoryViewModel {
-  const activeWorkspaces = workspaceSnapshots
-    .filter((workspace) => workspace.projectId === project.id && workspace.archivingAt === null)
-    .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
-  const workspaceIds = new Set(activeWorkspaces.map((workspace) => workspace.id));
-  const agentsByWorkspace = new Map<string, ObservatoryAgentView[]>();
-
-  for (const snapshot of agentSnapshots) {
-    if (!workspaceIds.has(snapshot.workspaceId)) continue;
-    const agents = agentsByWorkspace.get(snapshot.workspaceId) ?? [];
-    agents.push({
-      id: snapshot.id,
-      workspaceId: snapshot.workspaceId,
-      title: snapshot.title?.trim() || snapshot.id,
-      status: snapshot.status,
-      lifecycle: lifecycleFor(snapshot),
-      updatedAt: snapshot.updatedAt,
-      model: snapshot.model,
-      usageTurns: agentUsageTurns(snapshot.usage ?? emptyAgentUsage()),
-      switchedModels: false,
-    });
-    agentsByWorkspace.set(snapshot.workspaceId, agents);
-  }
-
-  const workspaces = activeWorkspaces.map((workspace) => ({
-    id: workspace.id,
-    name: workspace.name,
-    agents: (agentsByWorkspace.get(workspace.id) ?? []).sort(compareAgents),
-  }));
-  const agents = workspaces.flatMap((workspace) => workspace.agents);
-  const count = (lifecycle: AgentLifecycle) =>
-    agents.reduce((total, agent) => total + Number(agent.lifecycle === lifecycle), 0);
-  for (const agent of agents) {
+export function createProjectObservation(project: ObservatoryProject, workspaceSnapshots: readonly ObservatoryWorkspaceSnapshot[], agentSnapshots: readonly ObservatoryAgentSnapshot[], filters: { query?: string; lifecycles?: AgentLifecycle[] } = {}): ObservatoryViewModel {
+  const active = workspaceSnapshots.filter(w => w.projectId === project.id && w.archivingAt === null).sort(compareWorkspace);
+  const ids = new Set(active.map(w => w.id));
+  const all = agentSnapshots.filter(a => ids.has(a.workspaceId)).map(toAgent);
+  const counts = (["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(lifecycle => ({ label: labelFor(lifecycle), count: all.filter(a => a.lifecycle === lifecycle).length }));
+  const query = filters.query?.trim().toLocaleLowerCase();
+  const allowed = filters.lifecycles?.length ? new Set(filters.lifecycles) : null;
+  const kept = all.filter(a => (!allowed || allowed.has(a.lifecycle)) && (!query || a.title.toLocaleLowerCase().includes(query) || active.find(w => w.id === a.workspaceId)?.name.toLocaleLowerCase().includes(query)));
+  const keptIds = new Set(kept.map(a => a.id));
+  const byId = new Map(all.map(a => [a.id, a]));
+  for (const agent of kept) {
+    const parentId = agent.parentId;
+    const parent = parentId ? byId.get(parentId) : undefined;
+    if (parent && keptIds.has(parent.id) && parent.workspaceId === agent.workspaceId) { agent.parentTitle = parent.title; agent.parentWorkspaceId = parent.workspaceId; }
+    else if (parent) { agent.parentTitle = parent.title; agent.parentWorkspaceId = parent.workspaceId; }
+    else if (parentId) { agent.parentTitle = null; agent.parentWorkspaceId = null; }
+    agent.depth = parent && keptIds.has(parent.id) && parent.workspaceId === agent.workspaceId ? (parent.depth + 1) : 0;
     agent.switchedModels =
-      new Set(
-        agent.usageTurns.filter((turn) => !turn.provisional).map((turn) => turn.model ?? agent.model),
-      ).size > 1;
+      new Set(agent.usageTurns.filter((turn) => !turn.provisional).map((turn) => turn.model ?? agent.model)).size > 1;
   }
-
-  return {
-    project,
-    counts: [
-      { label: "Active", count: count("active") },
-      { label: "Waiting", count: count("waiting") },
-      { label: "Finished", count: count("finished") },
-      { label: "Failed", count: count("failed") },
-      { label: "Other", count: count("other") },
-    ],
-    models: aggregateModelUsage(
-      agents.map((agent) => ({
-        model: agent.model,
-        usage: { finalizedTurns: agent.usageTurns, provisionalTurn: null },
-      })),
-    ),
-    workspaces,
-  };
+  const workspaces = active.map(w => ({ id: w.id, name: w.name, agents: treeOrder(kept.filter(a => a.workspaceId === w.id)) }));
+  const agents = workspaces.flatMap((workspace) => workspace.agents);
+  return { project, counts, models: aggregateModelUsage(agents.map((agent) => ({ model: agent.model, usage: { finalizedTurns: agent.usageTurns, provisionalTurn: null } }))), workspaces };
 }
-
-function compareAgents(left: ObservatoryAgentView, right: ObservatoryAgentView): number {
-  const lifecycleDifference =
-    lifecycleOrder.indexOf(left.lifecycle) - lifecycleOrder.indexOf(right.lifecycle);
-  return lifecycleDifference || left.title.localeCompare(right.title) || left.id.localeCompare(right.id);
+function treeOrder(agents: ObservatoryAgentView[]): ObservatoryAgentView[] {
+  const children = new Map<string, ObservatoryAgentView[]>(); const roots: ObservatoryAgentView[] = [];
+  for (const a of agents) { const p = a.parentId && agents.some(x => x.id === a.parentId && x.workspaceId === a.workspaceId) ? a.parentId : null; if (p) (children.get(p) ?? (children.set(p, []), children.get(p)!)).push(a); else roots.push(a); }
+  const out: ObservatoryAgentView[] = []; const visit = (a: ObservatoryAgentView, depth: number) => { a.depth = depth; out.push(a); for (const child of (children.get(a.id) ?? []).sort(compareAgents)) visit(child, depth + 1); };
+  for (const root of roots.sort(compareAgents)) visit(root, 0); return out;
 }
+function compareWorkspace(a: ObservatoryWorkspaceSnapshot, b: ObservatoryWorkspaceSnapshot) { return a.name.localeCompare(b.name) || a.id.localeCompare(b.id) }
+function compareAgents(a: ObservatoryAgentView, b: ObservatoryAgentView) { return lifecycleOrder.indexOf(a.lifecycle) - lifecycleOrder.indexOf(b.lifecycle) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id) }
+function labelFor(l: AgentLifecycle): LifecycleCount["label"] { return l[0].toUpperCase() + l.slice(1) as LifecycleCount["label"] }
+function lifecycleFor(a: ObservatoryAgentSnapshot): AgentLifecycle { if (a.attentionReason === "permission") return "waiting"; if (["initializing", "running"].includes(a.status)) return "active"; if (["waiting", "needs_input", "permission"].includes(a.status)) return "waiting"; if (["idle", "closed"].includes(a.status)) return "finished"; if (["error", "failed"].includes(a.status)) return "failed"; return "other" }
+function toAgent(a: ObservatoryAgentSnapshot): ObservatoryAgentView { return { id: a.id, workspaceId: a.workspaceId, title: a.title?.trim() || a.id, status: a.status, lifecycle: lifecycleFor(a), updatedAt: a.updatedAt, parentId: a.labels?.[parentLabel] ?? null, parentTitle: null, parentWorkspaceId: null, depth: 0, model: a.model, usageTurns: agentUsageTurns(a.usage ?? emptyAgentUsage()), switchedModels: false } }
 
-function lifecycleFor(agent: ObservatoryAgentSnapshot): AgentLifecycle {
-  if (agent.attentionReason === "permission") return "waiting";
-
-  switch (agent.status) {
-    case "initializing":
-    case "running":
-      return "active";
-    case "waiting":
-    case "needs_input":
-    case "permission":
-      return "waiting";
-    case "idle":
-    case "closed":
-      return "finished";
-    case "error":
-    case "failed":
-      return "failed";
-    default:
-      return "other";
-  }
+export function normalizeTimelineEntry(entry: RawTimelineEntry): NormalizedTimelineEntry {
+  const item = entry.item && typeof entry.item === "object" ? entry.item as Record<string, unknown> : {};
+  const type = String(item.type ?? item.kind ?? ""); const text = typeof item.text === "string" ? item.text : typeof item.summary === "string" ? item.summary : "";
+  const summary = text.slice(0, 140); let category: TimelineCategory = "other"; let label = "Other activity";
+  if (["user_message", "assistant_message", "reasoning"].includes(type)) { category = "message"; label = "Message"; }
+  else if (type === "tool_call") { category = item.status === "failed" ? "failure" : "tool_activity"; label = category === "failure" ? "Failure" : "Tool activity"; }
+  else if (type === "error") { category = "failure"; label = "Failure"; }
+  else if (type === "status_change") { category = "status_change"; label = "Status change"; }
+  else if (type === "permission_request") { category = "permission_request"; label = "Permission request"; }
+  else if (type === "completion") { category = "completion"; label = "Completion"; }
+  return { category, label, summary, at: entry.timestamp ?? String(item.timestamp ?? "") };
 }
+export function synthesizeAttentionEntry(agent: ObservatoryAgentSnapshot): NormalizedTimelineEntry | null { if (!agent.requiresAttention) return null; const category = agent.attentionReason === "permission" ? "permission_request" : agent.attentionReason === "finished" ? "completion" : agent.attentionReason === "error" ? "failure" : "status_change"; return { category, label: category === "permission_request" ? "Permission request" : category === "completion" ? "Completion" : category === "failure" ? "Failure" : "Status change", summary: agent.status, at: agent.updatedAt }; }

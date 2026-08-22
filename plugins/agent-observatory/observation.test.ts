@@ -4,6 +4,7 @@ import {
   agentUsageTurns,
   createProjectObservation,
   emptyAgentUsage,
+  normalizeTimelineEntry,
   reduceAgentUsage,
   type ObservatoryAgentUsageTurn,
 } from "./observation";
@@ -185,6 +186,33 @@ describe("createProjectObservation", () => {
     expect(view.counts.every(({ count }) => count === 0)).toBe(true);
     expect(view.workspaces).toEqual([{ id: "workspace-1", name: "Main", agents: [] }]);
   });
+
+  it("nests delegated children and preserves unknown parents", () => {
+    const view = createProjectObservation({ id: "project-1", name: "Project" }, [workspace("workspace-1", "Main")], [
+      agent("child", "running", { labels: { "paseo.parent-agent-id": "parent" } }),
+      agent("parent", "running"),
+      agent("orphan", "running", { labels: { "paseo.parent-agent-id": "missing" } }),
+    ]);
+    expect(view.workspaces[0]?.agents.map((item) => [item.id, item.depth, item.parentTitle])).toEqual([
+      ["orphan", 0, null], ["parent", 0, null], ["child", 1, "parent"],
+    ]);
+  });
+
+  it("normalizes supported and unknown timeline activity", () => {
+    expect(normalizeTimelineEntry({ item: { type: "user_message", text: "hello" } }).category).toBe("message");
+    expect(normalizeTimelineEntry({ item: { type: "tool_call", status: "ok" } }).category).toBe("tool_activity");
+    expect(normalizeTimelineEntry({ item: { type: "error" } }).category).toBe("failure");
+    expect(normalizeTimelineEntry({ item: { type: "provider_secret" } }).label).toBe("Other activity");
+  });
+
+  it("filters by workspace or agent query and lifecycle", () => {
+    const view = createProjectObservation({ id: "project-1", name: "Project" }, [workspace("workspace-1", "Main"), workspace("workspace-2", "Docs")], [
+      agent("writer", "running", { workspaceId: "workspace-1" }), agent("reviewer", "idle", { workspaceId: "workspace-2" }),
+    ], { query: "docs", lifecycles: ["finished"] });
+    expect(view.workspaces.map((item) => item.id)).toEqual(["workspace-2", "workspace-1"]);
+    expect(view.workspaces[0]?.agents.map((item) => item.id)).toEqual(["reviewer"]);
+    expect(view.counts.find((item) => item.label === "Active")?.count).toBe(1);
+  });
 });
 
 function workspace(
@@ -208,6 +236,7 @@ function agent(
     workspaceId: string;
     requiresAttention: boolean;
     attentionReason: string | null;
+    labels: Record<string, string>;
   }> = {},
 ) {
   return {
@@ -219,6 +248,7 @@ function agent(
     requiresAttention: false,
     attentionReason: null,
     model: null,
+    labels: {},
     ...overrides,
   };
 }
