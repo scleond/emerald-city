@@ -82,5 +82,11 @@ export default function contribute(plugin: PluginContext) {
     }
   });
 
-  return () => {};
+  // Reload/shutdown cleanup: daemon-side plugin owns no long-lived subscriptions or timers;
+  // RPC handlers are owned by the plugin runtime and released when this cleanup runs.
+  // Reset the lazy store promise so a subsequent reload re-creates a fresh store without
+  // carrying stale file handles or cached state.
+  return () => {
+    storePromise = null;
+  };
 }
