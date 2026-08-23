@@ -99,7 +99,7 @@ export function reduceAgentUsage(
   return {
     finalizedTurns: finalized,
     provisionalTurn:
-      !event.turnId || record.provisionalTurn?.turnId === event.turnId
+      !event.turnId || record.provisionalTurn?.turnId === event.turnId || record.provisionalTurn?.turnId === null
         ? null
         : record.provisionalTurn,
   };

@@ -25,6 +25,13 @@ describe("usage turn store", () => {
     expect(final.provisionalTurn).toBeNull();
     expect(final.finalizedTurns).toHaveLength(1);
   });
+
+  it("clears an anonymous provisional when the final event has an identity", () => {
+    const provisional = reduceAgentUsage(emptyAgentUsage(), { kind: "provisional", model: "model", usage: { inputTokens: 10 } });
+    const final = reduceAgentUsage(provisional, { kind: "final", turnId: "generated-turn", model: "model", usage: { inputTokens: 10, outputTokens: 2 } });
+    expect(final.provisionalTurn).toBeNull();
+    expect(final.finalizedTurns).toEqual([expect.objectContaining({ turnId: "generated-turn" })]);
+  });
   it("normalizes live and historical usage shapes to one turn event", () => {
     expect(normalizeUsageEvent({ type: "usage_updated", turnId: "t", usage: { inputTokens: 1 }, timestamp: "2026-01-01T00:00:00.000Z" })).toMatchObject({ kind: "provisional", turnId: "t" });
     expect(normalizeUsageEvent({ kind: "turn_completed", turnId: "t", usage: { outputTokens: 2 }, observedAt: "2026-01-01T00:00:01.000Z" })).toMatchObject({ kind: "final", turnId: "t", observedAt: "2026-01-01T00:00:01.000Z" });
