@@ -229,6 +229,18 @@ export function AgentObservatoryPanel({
       usageSection: {
         gap: layout.compact ? 6 : 8,
       },
+      historyCard: { gap: 12, padding: layout.compact ? 12 : 16, borderWidth: 1, borderColor: theme.colors.foregroundMuted, borderRadius: 10 },
+      chartRow: { flexDirection: "row" as const, gap: 16, minHeight: layout.compact ? 180 : 230 },
+      chartPanel: { flex: 1, gap: 8, minWidth: 0 },
+      chartPlot: { flex: 1, flexDirection: "row" as const, alignItems: "flex-end" as const, gap: 2, minHeight: 130, borderBottomWidth: 1, borderLeftWidth: 1, borderColor: theme.colors.foregroundMuted, paddingHorizontal: 4 },
+      chartBar: { flex: 1, justifyContent: "flex-end" as const, alignItems: "stretch" as const, maxWidth: 18 },
+      chartSegment: { minHeight: 1 },
+      linePlot: { flex: 1, minHeight: 130, borderBottomWidth: 1, borderLeftWidth: 1, borderColor: theme.colors.foregroundMuted, position: "relative" as const },
+      chartLine: { position: "absolute" as const, height: 2 },
+      chartAxis: { flexDirection: "row" as const, justifyContent: "space-between" as const },
+      rangeTabs: { flexDirection: "row" as const, gap: 6 },
+      rangeTab: { borderWidth: 1, borderColor: theme.colors.foregroundMuted, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6 },
+      rangeTabActive: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
       barRow: {
         gap: 2,
         paddingVertical: layout.compact ? 4 : 6,
@@ -423,6 +435,18 @@ interface PanelStyles {
   workspaceBadge: TextStyle;
   error: TextStyle;
   usageSection: ViewStyle;
+  historyCard: ViewStyle;
+  chartRow: ViewStyle;
+  chartPanel: ViewStyle;
+  chartPlot: ViewStyle;
+  chartBar: ViewStyle;
+  chartSegment: ViewStyle;
+  linePlot: ViewStyle;
+  chartLine: ViewStyle;
+  chartAxis: ViewStyle;
+  rangeTabs: ViewStyle;
+  rangeTab: ViewStyle;
+  rangeTabActive: ViewStyle;
   barRow: ViewStyle;
   barHeader: ViewStyle;
   modelName: TextStyle;
@@ -537,16 +561,15 @@ function ReadyContent({ view, historicalUsage, styles, telemetry, lifecycle, set
   const agentCount = view.workspaces.reduce((total, workspace) => total + workspace.agents.length, 0);
   const titles = new Map(view.workspaces.flatMap((workspace) => workspace.agents.map((agent) => [agent.id, agent.title] as const)));
   const historyTurns = view.workspaces.flatMap((workspace) => workspace.agents.flatMap((agent) => agent.usageTurns.filter((turn) => !turn.provisional && turn.observedAt).map((turn): NormalizedUsageTurn => ({ projectId: view.project.id, workspaceId: workspace.id, agentId: agent.id, turnId: turn.turnId ?? `${agent.id}-${turn.observedAt}`, observedAt: turn.observedAt!, startedAt: turn.startedAt ?? null, completedAt: turn.completedAt ?? null, model: turn.model ?? agent.model, inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens, outputTokens: turn.outputTokens, contextUsedTokens: turn.contextUsedTokens, contextMaxTokens: turn.contextMaxTokens, costUsd: turn.costUsd, costState: turn.costUsd === null ? "unknown" : "complete", confidence: "high" }))));
-  const history = projectHistoryForRange(historyTurns, historyRange, Date.now());
+  const history = historicalUsage?.[historyRange] ?? projectHistoryForRange(historyTurns, historyRange, Date.now());
   const [exported, setExported] = React.useState<string | null>(null);
   return (
     <>
        <Text style={styles.subtitle}>Project: {view.project.name}</Text>
        <Text style={styles.subtitle}>Project-wide token usage across active workspaces.</Text>
        <Text style={styles.label}>{view.workspaces.length} workspaces · {agentCount} agents</Text>
-       <View accessibilityLabel="Usage history controls" style={styles.secondary}><Text accessibilityRole="header" style={styles.sectionTitle}>Usage history</Text><Text style={styles.label}>{historySourceLabel(history)}</Text><Text style={styles.label}>Selected range: {USAGE_RANGE_LABELS[historyRange]} · {history.recordedTokens.toLocaleString()} recorded tokens</Text><View style={styles.toolbar}>{(Object.keys(USAGE_RANGE_LABELS) as UsageRange[]).map((range) => <Pressable key={range} accessibilityRole="radio" accessibilityState={{ selected: historyRange === range }} accessibilityLabel={`Show ${USAGE_RANGE_LABELS[range]} usage history`} onPress={() => setHistoryRange(range)} style={styles.touchTarget}><Text style={styles.label}>{historyRange === range ? `✓ ${USAGE_RANGE_LABELS[range]}` : USAGE_RANGE_LABELS[range]}</Text></Pressable>)}</View><Pressable accessibilityRole="button" accessibilityLabel="Export sanitized usage history" onPress={() => { const result = prepareSanitizedUsageExport(history.turns); setExported(result.data ?? result.error ?? "Export failed; try again."); }} style={styles.touchTarget}><Text style={styles.label}>Prepare sanitized history for copying</Text></Pressable>{exported ? <Text selectable accessibilityLabel={exported.startsWith("Export failed") ? "Sanitized export failed" : "Sanitized export data, selectable for copying"} style={styles.label}>{exported}</Text> : null}</View>
        <DashboardSummary dashboard={view.dashboard} historicalUsage={historicalUsage} styles={styles} />
-       <View accessibilityLabel="Usage history controls" style={styles.secondary}><Text accessibilityRole="header" style={styles.sectionTitle}>Usage history</Text><Text style={styles.label}>{historySourceLabel(history)}</Text><Text style={styles.label}>Selected range: {USAGE_RANGE_LABELS[historyRange]} · {history.recordedTokens.toLocaleString()} recorded tokens</Text><View style={styles.toolbar}>{(Object.keys(USAGE_RANGE_LABELS) as UsageRange[]).map((range) => <Pressable key={range} accessibilityRole="radio" accessibilityState={{ selected: historyRange === range }} accessibilityLabel={`Show ${USAGE_RANGE_LABELS[range]} usage history`} onPress={() => setHistoryRange(range)} style={styles.touchTarget}><Text style={styles.label}>{historyRange === range ? `✓ ${USAGE_RANGE_LABELS[range]}` : USAGE_RANGE_LABELS[range]}</Text></Pressable>)}</View><Pressable accessibilityRole="button" accessibilityLabel="Export sanitized usage history" onPress={() => { const result = prepareSanitizedUsageExport(history.turns); setExported(result.data ?? result.error ?? "Export failed; try again."); }} style={styles.touchTarget}><Text style={styles.label}>Prepare sanitized history for copying</Text></Pressable>{exported ? <Text selectable accessibilityLabel={exported.startsWith("Export failed") ? "Sanitized export failed" : "Sanitized export data, selectable for copying"} style={styles.label}>{exported}</Text> : null}</View>
+       <HistoryCharts history={history} range={historyRange} onRangeChange={setHistoryRange} styles={styles} exportValue={exported} onExport={() => { const result = prepareSanitizedUsageExport(history.turns); setExported(result.data ?? result.error ?? "Export failed; try again."); }} />
       <View accessibilityLabel="Agent lifecycle summary" style={styles.summary}>
         {view.counts.map(({ label, count }) => (
           <View key={label} accessibilityLabel={`${label}: ${count}`}>
@@ -620,6 +643,28 @@ function DashboardSummary({ dashboard, historicalUsage, styles }: { dashboard: O
   const history = historicalUsage?.["30d"];
   if (history) cards.push(["30d recorded", history.recordedTokens.toLocaleString(), `${history.turns.length} persisted turns`]);
   return <View accessibilityLabel="Usage summary" style={styles.summary}>{cards.map(([label, value, support]) => <View key={label} style={styles.card} accessibilityLabel={`${label}: ${value}. ${support}`}><Text style={styles.count}>{value}</Text><Text style={styles.label}>{label}</Text><Text style={styles.label}>{support}</Text></View>)}</View>;
+}
+
+function HistoryCharts({ history, range, onRangeChange, styles, exportValue, onExport }: { history: HistoricalUsageProjection; range: UsageRange; onRangeChange: (range: UsageRange) => void; styles: PanelStyles; exportValue: string | null; onExport: () => void }) {
+  const bucketCount = range === "24h" ? 24 : range === "7d" ? 7 : 30;
+  const bucketMs = range === "24h" ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  const buckets = Array.from({ length: bucketCount }, () => ({ fresh: 0, cached: 0, output: 0 }));
+  for (const turn of history.turns) {
+    const at = Date.parse(turn.completedAt ?? turn.startedAt ?? turn.observedAt);
+    const index = Math.min(bucketCount - 1, Math.max(0, Math.floor((history.to - at) / bucketMs)));
+    const bucket = buckets[bucketCount - 1 - index];
+    const input = turn.inputTokens ?? 0;
+    bucket.cached += Math.min(input, turn.cachedInputTokens ?? 0);
+    bucket.fresh += Math.max(0, input - (turn.cachedInputTokens ?? 0));
+    bucket.output += turn.outputTokens ?? 0;
+  }
+  const maxBar = Math.max(1, ...buckets.map((bucket) => bucket.fresh + bucket.cached + bucket.output));
+  const cumulative = { fresh: 0, cached: 0, output: 0 };
+  const lines = buckets.map((bucket) => { cumulative.fresh += bucket.fresh; cumulative.cached += bucket.cached; cumulative.output += bucket.output; return { ...cumulative }; });
+  const maxLine = Math.max(1, ...lines.flatMap((point) => [point.fresh, point.cached, point.output]));
+  const palette = { fresh: "#93b4f4", cached: "#f3f4f6", output: "#d99b91" };
+  const lineSegments = (key: "fresh" | "cached" | "output", color: string) => lines.slice(1).map((point, index) => { const previous = lines[index][key] / maxLine; const current = point[key] / maxLine; const dx = 100 / bucketCount; const dy = (previous - current) * 130; const length = Math.sqrt(dx * dx + dy * dy); const angle = Math.atan2(dy, dx) * 180 / Math.PI; return <View key={`${key}-${index}`} style={[styles.chartLine, { backgroundColor: color, left: `${(index + 0.5) * dx}%`, top: `${(1 - previous) * 100}%`, width: `${length}%`, transform: [{ rotate: `${angle}deg` }] }]} />; });
+  return <View accessibilityLabel={`${USAGE_RANGE_LABELS[range]} usage charts`} style={styles.historyCard}><View style={styles.headerRow}><View><Text accessibilityRole="header" style={styles.sectionTitle}>Usage history</Text><Text style={styles.label}>{historySourceLabel(history)} · {history.recordedTokens.toLocaleString()} recorded tokens</Text></View><View style={styles.rangeTabs}>{(Object.keys(USAGE_RANGE_LABELS) as UsageRange[]).map((value) => <Pressable key={value} accessibilityRole="radio" accessibilityState={{ selected: range === value }} onPress={() => onRangeChange(value)} style={[styles.rangeTab, range === value ? styles.rangeTabActive : undefined]}><Text style={range === value ? styles.dismissLabel : styles.label}>{USAGE_RANGE_LABELS[value]}</Text></Pressable>)}</View></View><View style={styles.chartRow}><View style={styles.chartPanel}><Text style={styles.label}>Tokens per {range === "24h" ? "hour" : "day"}</Text><View style={styles.chartPlot}>{buckets.map((bucket, index) => <View key={index} style={styles.chartBar}><View style={[styles.chartSegment, { height: `${bucket.output / maxBar * 100}%` }, styles.segmentOutput]} /><View style={[styles.chartSegment, { height: `${bucket.cached / maxBar * 100}%` }, styles.segmentCached]} /><View style={[styles.chartSegment, { height: `${bucket.fresh / maxBar * 100}%` }, styles.segmentFresh]} /></View>)}</View></View><View style={styles.chartPanel}><Text style={styles.label}>Cumulative fresh / cached / output</Text><View style={styles.linePlot}>{lineSegments("fresh", palette.fresh)}{lineSegments("cached", palette.cached)}{lineSegments("output", palette.output)}</View><View style={styles.chartAxis}><Text style={styles.label}>Start</Text><Text style={styles.label}>Now</Text></View></View></View><Pressable accessibilityRole="button" onPress={onExport} style={styles.touchTarget}><Text style={styles.label}>Prepare sanitized history for copying</Text></Pressable>{exportValue ? <Text selectable style={styles.label}>{exportValue}</Text> : null}</View>;
 }
 
 function ModelUsagePanel({ models, styles }: { models: ModelUsageBar[]; styles: PanelStyles }) {
