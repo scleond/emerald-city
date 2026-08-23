@@ -47,6 +47,8 @@ export function AgentObservatoryPanel({
   const [query, setQuery] = React.useState("");
   const [lifecycle, setLifecycle] = React.useState<AgentLifecycle | undefined>();
   const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(null);
+  const [secondaryOpen, setSecondaryOpen] = React.useState(false);
+  const [attentionOpen, setAttentionOpen] = React.useState(false);
   useEffect(() => { controller.setFilters(query, lifecycle ? [lifecycle] : []); }, [controller, query, lifecycle]);
   useEffect(() => {
     if (state.phase === "ready") {
@@ -289,6 +291,23 @@ export function AgentObservatoryPanel({
         gap: 4,
         minHeight: 180,
       },
+      secondary: {
+        gap: 8,
+        padding: 10,
+        borderWidth: 1,
+        borderColor: theme.colors.foregroundMuted,
+        borderRadius: 10,
+      },
+      toolbar: {
+        flexDirection: "row" as const,
+        flexWrap: "wrap" as const,
+        alignItems: "center" as const,
+        gap: 8,
+      },
+      control: {
+        color: theme.colors.foregroundMuted,
+        fontSize: 12,
+      },
     }),
     [layout.compact, theme],
   );
@@ -297,9 +316,16 @@ export function AgentObservatoryPanel({
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "700", letterSpacing: 1.5 }}>TOKEN USAGE</Text>
       <Text accessibilityRole="header" style={styles.title}>Agent Observatory</Text>
-       <TextInput accessibilityLabel="Search workspaces or agents" placeholder="Search workspaces or agents" value={query} onChangeText={setQuery} style={{ color: theme.colors.foreground, borderWidth: 1, padding: 8 }} />
-      <View style={styles.summary}>{(["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(value => <Pressable key={value} onPress={() => setLifecycle(lifecycle === value ? undefined : value)}><Text style={styles.label}>{value}</Text></Pressable>)}</View>
-      <StateContent state={state} styles={styles} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} />
+      <View accessibilityLabel="Secondary dashboard controls" style={styles.secondary}>
+        <Pressable accessibilityRole="button" onPress={() => setSecondaryOpen(!secondaryOpen)}>
+          <Text style={styles.control}>{secondaryOpen ? "Hide filters" : "Search and filter agents"}</Text>
+        </Pressable>
+        {secondaryOpen ? <>
+          <TextInput accessibilityLabel="Search workspaces or agents" placeholder="Search workspaces or agents" value={query} onChangeText={setQuery} style={{ color: theme.colors.foreground, borderWidth: 1, padding: 8 }} />
+          <View style={styles.toolbar}>{(["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(value => <Pressable key={value} onPress={() => setLifecycle(lifecycle === value ? undefined : value)}><Text style={styles.label}>{lifecycle === value ? `✓ ${value}` : value}</Text></Pressable>)}</View>
+        </> : null}
+      </View>
+      <StateContent state={state} styles={styles} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} attentionOpen={attentionOpen} toggleAttention={() => setAttentionOpen(!attentionOpen)} />
     </ScrollView>
   );
 }
@@ -350,6 +376,9 @@ interface PanelStyles {
   analysisRow: ViewStyle;
   treePanel: ViewStyle;
   detailPanel: ViewStyle;
+  secondary: ViewStyle;
+  toolbar: ViewStyle;
+  control: TextStyle;
 }
 
 const ATTENTION_REASON_STYLES: Record<AttentionReasonKind, keyof PanelStyles> = {
@@ -358,14 +387,14 @@ const ATTENTION_REASON_STYLES: Record<AttentionReasonKind, keyof PanelStyles> = 
   inactivity: "reasonInactivity",
 };
 
-function AttentionQueue({ attention, titles, styles, selectAgent, onDismiss }: { attention: AttentionEntry[]; titles: Map<string, string>; styles: PanelStyles; selectAgent: (id: string) => void; onDismiss: (entry: AttentionEntry) => void }) {
+function AttentionQueue({ attention, titles, styles, selectAgent, onDismiss, expanded, onToggle }: { attention: AttentionEntry[]; titles: Map<string, string>; styles: PanelStyles; selectAgent: (id: string) => void; onDismiss: (entry: AttentionEntry) => void; expanded: boolean; onToggle: () => void }) {
   if (attention.length === 0) return null;
   return (
     <View accessibilityLabel="Project attention queue">
-      <Text accessibilityRole="header" style={styles.sectionTitle}>
-        Needs attention
-      </Text>
-      {attention.map((entry) => (
+      <Pressable accessibilityRole="button" onPress={onToggle}>
+        <Text accessibilityRole="header" style={styles.sectionTitle}>Needs attention ({attention.length}) {expanded ? "▴" : "▾"}</Text>
+      </Pressable>
+      {expanded ? attention.map((entry) => (
         <Pressable
           key={`${entry.agentId}-${entry.episodeId}`}
           onPress={() => selectAgent(entry.agentId)}
@@ -385,12 +414,12 @@ function AttentionQueue({ attention, titles, styles, selectAgent, onDismiss }: {
             <Text style={styles.dismissLabel}>Dismiss</Text>
           </Pressable>
         </Pressable>
-      ))}
+      )) : null}
     </View>
   );
 }
 
-function StateContent({ state, styles, selectedAgentId, selectAgent, loadMore, onDismiss }: { state: ProjectObservationState; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; onDismiss: (entry: AttentionEntry) => void }) {
+function StateContent({ state, styles, selectedAgentId, selectAgent, loadMore, onDismiss, attentionOpen, toggleAttention }: { state: ProjectObservationState; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
   if (state.phase === "loading") {
     return <Text style={styles.subtitle}>Loading project agents…</Text>;
   }
@@ -410,10 +439,10 @@ function StateContent({ state, styles, selectedAgentId, selectAgent, loadMore, o
       </View>
     );
   }
-  return <ReadyContent view={state.view} styles={styles} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} onDismiss={onDismiss} />;
+  return <ReadyContent view={state.view} styles={styles} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} onDismiss={onDismiss} attentionOpen={attentionOpen} toggleAttention={toggleAttention} />;
 }
 
-function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, timeline, attention, onDismiss }: { view: ObservatoryViewModel; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[]; onDismiss: (entry: AttentionEntry) => void }) {
+function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, timeline, attention, onDismiss, attentionOpen, toggleAttention }: { view: ObservatoryViewModel; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[]; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
   const agentCount = view.workspaces.reduce((total, workspace) => total + workspace.agents.length, 0);
   const titles = new Map(view.workspaces.flatMap((workspace) => workspace.agents.map((agent) => [agent.id, agent.title] as const)));
   return (
@@ -430,7 +459,7 @@ function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, ti
           </View>
         ))}
       </View>
-      <AttentionQueue attention={attention} titles={titles} styles={styles} selectAgent={selectAgent} onDismiss={onDismiss} />
+       <AttentionQueue attention={attention} titles={titles} styles={styles} selectAgent={selectAgent} onDismiss={onDismiss} expanded={attentionOpen} onToggle={toggleAttention} />
        <ModelUsagePanel models={view.models} styles={styles} />
       <Text accessibilityRole="header" style={styles.sectionTitle}>
         Workspaces
