@@ -85,6 +85,7 @@ export class ProjectObservationController {
   private readonly usageStore?: UsageTurnStore;
   private readonly historicalTurns = new Map<string, readonly NormalizedUsageTurn[]>();
   private telemetry?: TelemetryDiagnostic;
+  private readonly anonymousPersistenceIds = new Map<string, string>();
 
   constructor(
     private readonly paseo: ObservatoryPaseoApi,
@@ -149,6 +150,7 @@ export class ProjectObservationController {
     this.usage.clear();
     this.historicalTurns.clear();
     this.agentModels.clear();
+    this.anonymousPersistenceIds.clear();
     this.directorySubscriptionsActive = false;
     if (this.timer !== null) {
       this.timers.clearInterval(this.timer);
@@ -424,11 +426,16 @@ export class ProjectObservationController {
       this.publishReady();
       return;
     }
+    const persistenceId = !usageEvent.turnId && usageEvent.kind === "provisional"
+      ? (this.anonymousPersistenceIds.get(payload.agentId) ?? fallbackUsageIdentity(model, usageEvent.usage))
+      : !usageEvent.turnId ? this.anonymousPersistenceIds.get(payload.agentId) : undefined;
+    if (!usageEvent.turnId && usageEvent.kind === "provisional" && persistenceId) this.anonymousPersistenceIds.set(payload.agentId, persistenceId);
+    if (!usageEvent.turnId && usageEvent.kind === "final") this.anonymousPersistenceIds.delete(payload.agentId);
     this.usage.set(
       payload.agentId,
       reduceAgentUsage(this.usage.get(payload.agentId) ?? emptyAgentUsage(), usageEvent, model),
     );
-    void this.persistUsage(payload.agentId, { ...usageEvent, observedAt: event.timestamp }, model);
+    void this.persistUsage(payload.agentId, { ...usageEvent, observedAt: event.timestamp }, model, persistenceId);
     this.publishReady();
   }
 
@@ -440,19 +447,24 @@ export class ProjectObservationController {
       if (!usage || !["usage_updated", "turn_completed"].includes(type)) continue;
       const event = normalizeUsageEvent({ type, turnId: item.turnId, model: item.model, usage, timestamp: entry.timestamp });
       if (!event) continue;
+      const persistenceId = !event.turnId && event.kind === "provisional"
+        ? (this.anonymousPersistenceIds.get(agentId) ?? fallbackUsageIdentity(event.model ?? this.agentModels.get(agentId), event.usage))
+        : !event.turnId ? this.anonymousPersistenceIds.get(agentId) : undefined;
+      if (!event.turnId && event.kind === "provisional" && persistenceId) this.anonymousPersistenceIds.set(agentId, persistenceId);
+      if (!event.turnId && event.kind === "final") this.anonymousPersistenceIds.delete(agentId);
       this.usage.set(agentId, reduceAgentUsage(this.usage.get(agentId) ?? emptyAgentUsage(), event, this.agentModels.get(agentId) ?? null));
-      void this.persistUsage(agentId, event, event.model ?? this.agentModels.get(agentId) ?? null, entry.timestamp);
+      void this.persistUsage(agentId, event, event.model ?? this.agentModels.get(agentId) ?? null, persistenceId, entry.timestamp);
     }
   }
 
-  private async persistUsage(agentId: string, event: AgentUsageEvent, fallbackModel: string | null, observedAt = new Date(this.now()).toISOString()): Promise<void> {
+  private async persistUsage(agentId: string, event: AgentUsageEvent, fallbackModel: string | null, persistenceId?: string, observedAt = new Date(this.now()).toISOString()): Promise<void> {
     if (!this.usageStore || !this.project) return;
     const agent = this.agents.get(agentId);
     if (!agent || !event.usage) return;
     const usage = event.usage;
     const turn: NormalizedUsageTurn = {
       projectId: this.project.id, workspaceId: agent.workspaceId, agentId,
-      turnId: event.turnId ?? fallbackUsageIdentity(event.model ?? fallbackModel),
+      turnId: event.turnId ?? persistenceId ?? fallbackUsageIdentity(event.model ?? fallbackModel, usage),
       observedAt, startedAt: null, completedAt: event.kind === "final" ? observedAt : null,
       model: event.model ?? fallbackModel, inputTokens: usage.inputTokens ?? null, cachedInputTokens: usage.cachedInputTokens ?? null,
       outputTokens: usage.outputTokens ?? null, contextUsedTokens: usage.contextWindowUsedTokens ?? null, contextMaxTokens: usage.contextWindowMaxTokens ?? null,

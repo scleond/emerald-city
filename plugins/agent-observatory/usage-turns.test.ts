@@ -19,6 +19,12 @@ describe("usage turn store", () => {
     expect(twice.finalizedTurns).toHaveLength(1);
   });
 
+  it("keeps distinct same-model anonymous finals with different usage", () => {
+    let record = reduceAgentUsage(emptyAgentUsage(), { kind: "final", model: "model", usage: { inputTokens: 10, outputTokens: 2 } });
+    record = reduceAgentUsage(record, { kind: "final", model: "model", usage: { inputTokens: 10, outputTokens: 3 } });
+    expect(record.finalizedTurns).toHaveLength(2);
+  });
+
   it("replaces an anonymous provisional turn with its final event", () => {
     const provisional = reduceAgentUsage(emptyAgentUsage(), { kind: "provisional", model: "model", usage: { inputTokens: 10 } });
     const final = reduceAgentUsage(provisional, { kind: "final", model: "model", usage: { inputTokens: 10, outputTokens: 2 } });
@@ -43,7 +49,8 @@ describe("usage turn store", () => {
   });
 
   it("exposes one stable anonymous persistence identity", () => {
-    expect(fallbackUsageIdentity("model")).toBe(fallbackUsageIdentity("model"));
+    expect(fallbackUsageIdentity("model", { inputTokens: 1 })).toBe(fallbackUsageIdentity("model", { inputTokens: 1 }));
+    expect(fallbackUsageIdentity("model", { inputTokens: 1 })).not.toBe(fallbackUsageIdentity("model", { inputTokens: 2 }));
   });
   it("exports only normalized usage fields", () => {
     const turn = { projectId: "p", workspaceId: "w", agentId: "a", turnId: "t", observedAt: "2026-01-01T00:00:00.000Z", startedAt: null, completedAt: null, model: "model", inputTokens: 1, cachedInputTokens: 0, outputTokens: 2, contextUsedTokens: null, contextMaxTokens: null, costUsd: null, costState: "unknown", confidence: "high" } satisfies NormalizedUsageTurn;

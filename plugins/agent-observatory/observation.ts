@@ -72,12 +72,14 @@ function toUsageTurn(
   };
 }
 
-export function fallbackUsageIdentity(model: string | null | undefined): string {
-  return `fallback:${model ?? "unknown"}`;
+/** Lower-confidence identity for events without a provider turn ID; usage is part of the key. */
+export function fallbackUsageIdentity(model: string | null | undefined, usage: ObservatoryUsageFields | null | undefined = undefined): string {
+  const normalized = Object.entries(usage ?? {}).filter(([, value]) => typeof value === "number" && Number.isFinite(value)).sort(([a], [b]) => a.localeCompare(b));
+  return `fallback:${model ?? "unknown"}:${JSON.stringify(normalized)}`;
 }
 
 function fallbackTurnIdentity(turn: ObservatoryAgentUsageTurn): string {
-  return fallbackUsageIdentity(turn.model);
+  return fallbackUsageIdentity(turn.model, { inputTokens: turn.inputTokens ?? undefined, cachedInputTokens: turn.cachedInputTokens ?? undefined, outputTokens: turn.outputTokens ?? undefined, totalCostUsd: turn.costUsd ?? undefined, contextWindowUsedTokens: turn.contextUsedTokens ?? undefined, contextWindowMaxTokens: turn.contextMaxTokens ?? undefined });
 }
 
 function turnIdentity(turn: ObservatoryAgentUsageTurn): string {

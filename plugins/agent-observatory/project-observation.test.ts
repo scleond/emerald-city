@@ -117,7 +117,7 @@ describe("ProjectObservationController", () => {
     harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "usage_updated", model: "model", usage: { inputTokens: 10 } } });
     harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", model: "model", usage: { inputTokens: 10, outputTokens: 2 } } });
     await vi.waitFor(() => expect(stored).toHaveLength(1));
-    expect(stored[0]).toMatchObject({ turnId: "fallback:model", confidence: "high" });
+    expect(stored[0]).toMatchObject({ turnId: "fallback:unknown:[[\"inputTokens\",10]]", confidence: "high" });
     controller.stop();
   });
 
