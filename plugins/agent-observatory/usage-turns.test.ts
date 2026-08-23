@@ -82,6 +82,25 @@ describe("usage turn store", () => {
     expect(historySourceLabel(projectHistoricalUsage([turn], "24h", Date.parse("2026-01-01T12:00:00.000Z")))).toBe("Locally observed · last record 12h ago (2026-01-01T00:00:00.000Z)");
   });
 
+  it.each([
+    ["minute", "2026-01-01T11:59:00.000Z", "1m ago"],
+    ["hour", "2026-01-01T11:00:00.000Z", "1h ago"],
+    ["day", "2025-12-31T12:00:00.000Z", "1d ago"],
+  ])("uses the projected timestamp precedence at the %s boundary", (_boundary, completedAt, age) => {
+    const item = turn({
+      observedAt: "2025-12-01T00:00:00.000Z",
+      startedAt: "2025-12-15T00:00:00.000Z",
+      completedAt,
+    });
+    expect(historySourceLabel(projectHistoricalUsage([item], "30d", Date.parse("2026-01-01T12:00:00.000Z")))).toContain(`last record ${age} (${completedAt})`);
+  });
+
+  it("falls back from completedAt to startedAt and then observedAt", () => {
+    const base = Date.parse("2026-01-01T12:00:00.000Z");
+    expect(historySourceLabel(projectHistoricalUsage([turn({ completedAt: null, startedAt: "2026-01-01T11:00:00.000Z" })], "24h", base))).toContain("1h ago (2026-01-01T11:00:00.000Z)");
+    expect(historySourceLabel(projectHistoricalUsage([turn({ observedAt: "2026-01-01T00:00:00.000Z", completedAt: null, startedAt: null })], "24h", base))).toContain("12h ago (2026-01-01T00:00:00.000Z)");
+  });
+
   it("wires the selected range into the historical projection", () => {
     const recent = turn({ turnId: "recent", observedAt: "2026-02-01T00:00:00.000Z", completedAt: "2026-02-01T00:00:00.000Z" });
     const old = turn({ turnId: "old", observedAt: "2026-01-01T00:00:00.000Z" });

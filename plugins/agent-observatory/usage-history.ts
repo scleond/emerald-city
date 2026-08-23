@@ -18,8 +18,9 @@ export function prepareSanitizedUsageExport(turns: readonly NormalizedUsageTurn[
 export function historySourceLabel(projection: ReturnType<typeof projectHistoricalUsage>): string {
   if (projection.turns.length === 0) return "Locally observed · no records in this range";
   const newest = projection.turns[projection.turns.length - 1];
-  const newestAt = Date.parse(newest.observedAt);
+  const newestTimestamp = newest.completedAt ?? newest.startedAt ?? newest.observedAt;
+  const newestAt = Date.parse(newestTimestamp);
   const ageMinutes = Math.max(0, Math.floor((projection.to - newestAt) / 60_000));
   const age = ageMinutes < 60 ? `${ageMinutes}m ago` : ageMinutes < 1_440 ? `${Math.floor(ageMinutes / 60)}h ago` : `${Math.floor(ageMinutes / 1_440)}d ago`;
-  return `Locally observed · last record ${age} (${newest.observedAt})`;
+  return `Locally observed · last record ${age} (${newestTimestamp})`;
 }
