@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createUsageTurnStore, type UsageTurnFileStorage, type NormalizedUsageTurn } from "./usage-turns";
+import { createUsageTurnStore, projectHistoricalUsage, type UsageTurnFileStorage, type NormalizedUsageTurn } from "./usage-turns";
 
 function storage(initial: string | null = null): UsageTurnFileStorage & { value: string | null } {
   return { value: initial, async read() { return this.value; }, async write(data) { this.value = data; } };
@@ -9,6 +9,27 @@ function turn(overrides: Partial<NormalizedUsageTurn> = {}): NormalizedUsageTurn
 }
 
 describe("usage turn store", () => {
+  it("projects fixed inclusive ranges in deterministic order and keeps history separate", () => {
+    const now = Date.parse("2026-02-10T00:00:00.000Z");
+    const result = projectHistoricalUsage([
+      turn({ turnId: "boundary", completedAt: "2026-02-09T00:00:00.000Z" }),
+      turn({ turnId: "later", completedAt: "2026-02-09T12:00:00.000Z", costUsd: null, costState: "unknown" }),
+      turn({ turnId: "live", completedAt: "2026-02-10T00:00:01.000Z" }),
+      turn({ turnId: "provisional", confidence: "low", completedAt: "2026-02-09T12:00:00.000Z" }),
+    ], "24h", now);
+    expect([result.from, result.to]).toEqual([now - 24 * 60 * 60 * 1000, now]);
+    expect(result.turns.map((item) => item.turnId)).toEqual(["boundary", "later"]);
+    expect(result.costState).toBe("estimated");
+  });
+
+  it("distinguishes exact, estimated, free-model, and unknown costs", () => {
+    const now = Date.parse("2026-01-11T00:00:00.000Z");
+    expect(projectHistoricalUsage([turn({ costUsd: 0 })], "30d", now).costState).toBe("free-model");
+    expect(projectHistoricalUsage([turn({ costUsd: 0.1, costState: "partial" })], "30d", now).costState).toBe("estimated");
+    expect(projectHistoricalUsage([turn({ costUsd: 0.1 })], "30d", now).costState).toBe("exact");
+    expect(projectHistoricalUsage([turn({ costUsd: null, costState: "unknown" })], "30d", now).costState).toBe("unknown");
+  });
+
   it("round trips and replaces by full scope and turn identity", async () => {
     const first = storage();
     const store = createUsageTurnStore({ storage: first, now: () => Date.parse("2026-01-11T00:00:00.000Z") });
