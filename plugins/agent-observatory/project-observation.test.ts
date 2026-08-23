@@ -68,6 +68,15 @@ describe("ProjectObservationController", () => {
     controller.stop();
   });
 
+  it("marks a completed event without usage as not reported", async () => {
+    const harness = createPaseoHarness();
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers());
+    await controller.start();
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", turnId: "turn-without-usage" } });
+    expect(controller.getSnapshot()).toMatchObject({ phase: "ready", telemetry: { type: "turn_completed", turnId: "turn-without-usage", health: "not-reported", usagePresent: false } });
+    controller.stop();
+  });
+
   it("persists live turns and replaces a provisional turn by identity", async () => {
     const stored: NormalizedUsageTurn[] = [];
     const usageStore: UsageTurnStore = {

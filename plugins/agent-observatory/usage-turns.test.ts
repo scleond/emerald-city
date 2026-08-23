@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createUsageTurnStore, projectHistoricalUsage, type UsageTurnFileStorage, type NormalizedUsageTurn } from "./usage-turns";
 import { historySourceLabel, prepareSanitizedUsageExport, projectHistoryForRange, sanitizedUsageExport } from "./usage-history";
 import { normalizeUsageEvent } from "./observation";
+import { emptyAgentUsage, reduceAgentUsage } from "./observation";
 
 function storage(initial: string | null = null): UsageTurnFileStorage & { value: string | null } {
   return { value: initial, async read() { return this.value; }, async write(data) { this.value = data; } };
@@ -11,6 +12,19 @@ function turn(overrides: Partial<NormalizedUsageTurn> = {}): NormalizedUsageTurn
 }
 
 describe("usage turn store", () => {
+  it("deduplicates anonymous final events without using observedAt as identity", () => {
+    const event = { kind: "final" as const, model: "model", usage: { inputTokens: 10, outputTokens: 2 }, observedAt: "2026-01-01T00:00:00.000Z" };
+    const once = reduceAgentUsage(emptyAgentUsage(), event);
+    const twice = reduceAgentUsage(once, { ...event, observedAt: "2026-01-01T00:01:00.000Z" });
+    expect(twice.finalizedTurns).toHaveLength(1);
+  });
+
+  it("replaces an anonymous provisional turn with its final event", () => {
+    const provisional = reduceAgentUsage(emptyAgentUsage(), { kind: "provisional", model: "model", usage: { inputTokens: 10 } });
+    const final = reduceAgentUsage(provisional, { kind: "final", model: "model", usage: { inputTokens: 10, outputTokens: 2 } });
+    expect(final.provisionalTurn).toBeNull();
+    expect(final.finalizedTurns).toHaveLength(1);
+  });
   it("normalizes live and historical usage shapes to one turn event", () => {
     expect(normalizeUsageEvent({ type: "usage_updated", turnId: "t", usage: { inputTokens: 1 }, timestamp: "2026-01-01T00:00:00.000Z" })).toMatchObject({ kind: "provisional", turnId: "t" });
     expect(normalizeUsageEvent({ kind: "turn_completed", turnId: "t", usage: { outputTokens: 2 }, observedAt: "2026-01-01T00:00:01.000Z" })).toMatchObject({ kind: "final", turnId: "t", observedAt: "2026-01-01T00:00:01.000Z" });

@@ -409,7 +409,7 @@ export class ProjectObservationController {
       usagePresent: event.usage !== undefined,
       usageFields: event.usage ? Object.keys(event.usage).sort() : [],
       eventFields: Object.keys(event).filter((key) => key !== "usage").sort(),
-      health: event.type === "turn_completed" ? "reported" : event.type === "usage_updated" ? "pending" : "not-reported",
+      health: event.type === "turn_completed" && event.usage !== undefined ? "reported" : event.type === "usage_updated" && event.usage !== undefined ? "pending" : "not-reported",
     };
     const model = this.agentModels.get(payload.agentId) ?? null;
     const usageEvent = normalizeUsageEvent(event);

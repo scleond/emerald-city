@@ -67,6 +67,14 @@ function toUsageTurn(
   };
 }
 
+function fallbackTurnIdentity(turn: ObservatoryAgentUsageTurn): string {
+  return `fallback:${turn.model ?? ""}:${turn.inputTokens ?? ""}:${turn.cachedInputTokens ?? ""}:${turn.outputTokens ?? ""}:${turn.costUsd ?? ""}:${turn.contextUsedTokens ?? ""}:${turn.contextMaxTokens ?? ""}`;
+}
+
+function turnIdentity(turn: ObservatoryAgentUsageTurn): string {
+  return turn.turnId ? `turn:${turn.turnId}` : fallbackTurnIdentity(turn);
+}
+
 export function reduceAgentUsage(
   record: AgentUsageRecord,
   event: AgentUsageEvent,
@@ -75,10 +83,10 @@ export function reduceAgentUsage(
   if (event.kind === "provisional") {
     return { ...record, provisionalTurn: toUsageTurn(event, agentModel) };
   }
-  const finalized = record.finalizedTurns.filter(
-    (turn) => !event.turnId || turn.turnId !== event.turnId,
-  );
-  finalized.push(toUsageTurn(event, agentModel));
+  const next = toUsageTurn(event, agentModel);
+  const identity = turnIdentity(next);
+  const finalized = record.finalizedTurns.filter((turn) => turnIdentity(turn) !== identity);
+  finalized.push(next);
   return {
     finalizedTurns: finalized,
     provisionalTurn:
