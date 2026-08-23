@@ -79,7 +79,7 @@ describe("usage turn store", () => {
 
   it("labels history as local and reports the newest data age", () => {
     const turn = { projectId: "p", workspaceId: "w", agentId: "a", turnId: "t", observedAt: "2026-01-01T00:00:00.000Z", startedAt: null, completedAt: null, model: "model", inputTokens: 1, cachedInputTokens: 0, outputTokens: 2, contextUsedTokens: null, contextMaxTokens: null, costUsd: null, costState: "unknown", confidence: "high" } satisfies NormalizedUsageTurn;
-    expect(historySourceLabel(projectHistoricalUsage([turn], "24h", Date.parse("2026-01-01T12:00:00.000Z")))).toContain("Locally observed");
+    expect(historySourceLabel(projectHistoricalUsage([turn], "24h", Date.parse("2026-01-01T12:00:00.000Z")))).toBe("Locally observed · last record 12h ago (2026-01-01T00:00:00.000Z)");
   });
 
   it("wires the selected range into the historical projection", () => {
