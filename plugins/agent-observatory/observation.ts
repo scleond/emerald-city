@@ -13,8 +13,8 @@ export interface ObservatoryUsageFields {
 }
 
 export type AgentUsageEvent =
-  | { kind: "provisional"; turnId?: string; model?: string | null; usage?: ObservatoryUsageFields }
-  | { kind: "final"; turnId?: string; model?: string | null; usage?: ObservatoryUsageFields };
+  | { kind: "provisional"; turnId?: string; model?: string | null; usage?: ObservatoryUsageFields; observedAt?: string }
+  | { kind: "final"; turnId?: string; model?: string | null; usage?: ObservatoryUsageFields; observedAt?: string };
 
 export interface ObservatoryAgentUsageTurn {
   turnId: string | null;
@@ -26,6 +26,9 @@ export interface ObservatoryAgentUsageTurn {
   contextUsedTokens: number | null;
   contextMaxTokens: number | null;
   provisional: boolean;
+  observedAt?: string | null;
+  startedAt?: string | null;
+  completedAt?: string | null;
 }
 
 export interface AgentUsageRecord {
@@ -52,6 +55,9 @@ function toUsageTurn(
     contextUsedTokens: usage.contextWindowUsedTokens ?? null,
     contextMaxTokens: usage.contextWindowMaxTokens ?? null,
     provisional: event.kind === "provisional",
+    observedAt: event.observedAt ?? null,
+    startedAt: event.observedAt ?? null,
+    completedAt: event.kind === "final" ? event.observedAt ?? null : null,
   };
 }
 

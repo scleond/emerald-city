@@ -25,6 +25,7 @@ export interface ObservatoryDismissalApi {
 
 export interface ObservatoryAgentStreamEvent {
   type: string;
+  timestamp?: string;
   turnId?: string;
   usage?: ObservatoryUsageFields;
   runtimeInfo?: { model?: string | null } | null;
@@ -416,7 +417,7 @@ export class ProjectObservationController {
       payload.agentId,
       reduceAgentUsage(this.usage.get(payload.agentId) ?? emptyAgentUsage(), usageEvent, model),
     );
-    void this.persistUsage(payload.agentId, usageEvent, model);
+    void this.persistUsage(payload.agentId, { ...usageEvent, observedAt: event.timestamp }, model);
     this.publishReady();
   }
 
@@ -431,6 +432,7 @@ export class ProjectObservationController {
         turnId: typeof item.turnId === "string" ? item.turnId : undefined,
         model: typeof item.model === "string" ? item.model : undefined,
         usage,
+        observedAt: entry.timestamp,
       };
       this.usage.set(agentId, reduceAgentUsage(this.usage.get(agentId) ?? emptyAgentUsage(), event, this.agentModels.get(agentId) ?? null));
       void this.persistUsage(agentId, event, event.model ?? this.agentModels.get(agentId) ?? null, entry.timestamp);
