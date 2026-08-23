@@ -79,12 +79,16 @@ export function fallbackUsageIdentity(model: string | null | undefined, usage: O
   return `fallback:${model ?? "unknown"}:${JSON.stringify(normalized)}`;
 }
 
+export function usageIdentity(turn: ObservatoryAgentUsageTurn): string {
+  return turn.turnId ? `turn:${turn.turnId}` : fallbackUsageIdentity(turn.model, { inputTokens: turn.inputTokens ?? undefined, cachedInputTokens: turn.cachedInputTokens ?? undefined, outputTokens: turn.outputTokens ?? undefined, totalCostUsd: turn.costUsd ?? undefined, contextWindowUsedTokens: turn.contextUsedTokens ?? undefined, contextWindowMaxTokens: turn.contextMaxTokens ?? undefined });
+}
+
 function fallbackTurnIdentity(turn: ObservatoryAgentUsageTurn): string {
   return fallbackUsageIdentity(turn.model, { inputTokens: turn.inputTokens ?? undefined, cachedInputTokens: turn.cachedInputTokens ?? undefined, outputTokens: turn.outputTokens ?? undefined, totalCostUsd: turn.costUsd ?? undefined, contextWindowUsedTokens: turn.contextUsedTokens ?? undefined, contextWindowMaxTokens: turn.contextMaxTokens ?? undefined });
 }
 
 function turnIdentity(turn: ObservatoryAgentUsageTurn): string {
-  return turn.turnId ? `turn:${turn.turnId}` : fallbackTurnIdentity(turn);
+  return usageIdentity(turn);
 }
 
 export function reduceAgentUsage(
@@ -96,7 +100,7 @@ export function reduceAgentUsage(
     const next = toUsageTurn(event, agentModel);
     const provisional = [...(record.provisionalTurns ?? (record.provisionalTurn ? [record.provisionalTurn] : []))];
     const identity = turnIdentity(next);
-    const index = provisional.findIndex((turn) => turnIdentity(turn) === identity);
+    const index = provisional.findIndex((turn) => turnIdentity(turn) === identity && turn.observedAt === next.observedAt);
     if (index >= 0) provisional[index] = next;
     else provisional.push(next);
     return { ...record, provisionalTurn: provisional[provisional.length - 1] ?? null, provisionalTurns: provisional };

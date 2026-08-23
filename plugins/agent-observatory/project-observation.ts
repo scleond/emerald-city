@@ -8,6 +8,7 @@ import {
   normalizeUsageEvent,
   hasUsableUsage,
   fallbackUsageIdentity,
+  usageIdentity,
   type AgentUsageEvent,
   type AgentUsageRecord,
   type ObservatoryAgentSnapshot,
@@ -85,7 +86,7 @@ export class ProjectObservationController {
   private readonly usageStore?: UsageTurnStore;
   private readonly historicalTurns = new Map<string, readonly NormalizedUsageTurn[]>();
   private telemetry?: TelemetryDiagnostic;
-  private readonly anonymousPersistenceIds = new Map<string, Map<string, string>>();
+  private readonly anonymousPersistenceIds = new Map<string, Map<string, string[]>>();
 
   constructor(
     private readonly paseo: ObservatoryPaseoApi,
@@ -455,14 +456,18 @@ export class ProjectObservationController {
     if (!identities) { identities = new Map(); this.anonymousPersistenceIds.set(agentId, identities); }
     if (event.kind === "provisional") {
       const key = fallbackUsageIdentity(event.model ?? model, event.usage);
-      const existing = identities.get(key);
-      if (existing) return existing;
-      identities.set(key, key);
-      return key;
+      const queue = identities.get(key) ?? [];
+      const identity = `${key}:${queue.length}`;
+      queue.push(identity);
+      identities.set(key, queue);
+      return identity;
     }
-    const first = identities.keys().next().value as string | undefined;
-    if (first) identities.delete(first);
-    return first;
+    const key = fallbackUsageIdentity(event.model ?? model, event.usage);
+    const matching = identities.get(key);
+    const queue = matching && matching.length > 0 ? matching : [...identities.values()].find((items) => items.length > 0);
+    const identity = queue?.shift();
+    if (matching && matching.length === 0) identities.delete(key);
+    return identity;
   }
 
   private async persistUsage(agentId: string, event: AgentUsageEvent, fallbackModel: string | null, persistenceId?: string, observedAt = new Date(this.now()).toISOString()): Promise<void> {

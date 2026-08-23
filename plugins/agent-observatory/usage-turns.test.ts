@@ -25,6 +25,12 @@ describe("usage turn store", () => {
     expect(record.finalizedTurns).toHaveLength(2);
   });
 
+  it("keeps identical anonymous provisional turns queued when separately observed", () => {
+    let record = reduceAgentUsage(emptyAgentUsage(), { kind: "provisional", model: "model", usage: { inputTokens: 10 }, observedAt: "2026-01-01T00:00:00.000Z" });
+    record = reduceAgentUsage(record, { kind: "provisional", model: "model", usage: { inputTokens: 10 }, observedAt: "2026-01-01T00:01:00.000Z" });
+    expect(record.provisionalTurns).toHaveLength(2);
+  });
+
   it("replaces an anonymous provisional turn with its final event", () => {
     const provisional = reduceAgentUsage(emptyAgentUsage(), { kind: "provisional", model: "model", usage: { inputTokens: 10 } });
     const final = reduceAgentUsage(provisional, { kind: "final", model: "model", usage: { inputTokens: 10, outputTokens: 2 } });
