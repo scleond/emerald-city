@@ -12,6 +12,9 @@ export const NormalizedUsageTurnSchema = z.object({
   startedAt: z.iso.datetime({ offset: true }).nullable(),
   completedAt: z.iso.datetime({ offset: true }).nullable(),
   model: z.string().min(1).nullable(),
+  canonicalModelId: z.string().min(1).nullable().default(null),
+  provider: z.string().min(1).nullable().default(null),
+  displayName: z.string().min(1).nullable().default(null),
   inputTokens: nullableNumber,
   cachedInputTokens: nullableNumber,
   outputTokens: nullableNumber,
@@ -66,6 +69,48 @@ export interface HistoricalUsageProjection {
   recordedTokens: number;
   reportedCostUsd: number | null;
   costState: HistoricalCostState;
+  models: readonly UsageAnalyticsBucket[];
+  workspaces: readonly UsageAnalyticsBucket[];
+}
+
+export interface UsageAnalyticsBucket {
+  key: string;
+  provider: string | null;
+  displayName: string;
+  inputTokens: number;
+  cachedInputTokens: number;
+  freshInputTokens: number;
+  outputTokens: number;
+  recordedTokens: number;
+  finalizedTurnCount: number;
+  averageInputTokens: number;
+  averageOutputTokens: number;
+  cachePercentage: number;
+  reportedCostUsd: number | null;
+  costState: HistoricalCostState;
+}
+
+function analytics(turns: readonly NormalizedUsageTurn[], dimension: "model" | "workspace"): UsageAnalyticsBucket[] {
+  const buckets = new Map<string, NormalizedUsageTurn[]>();
+  for (const turn of turns) {
+    const key = dimension === "model" ? turn.canonicalModelId ?? turn.model ?? "unknown" : turn.workspaceId;
+    buckets.set(key, [...(buckets.get(key) ?? []), turn]);
+  }
+  return [...buckets.entries()].map(([key, items]) => {
+    let inputTokens = 0; let cachedInputTokens = 0; let outputTokens = 0; let cost = 0; let known = 0; let estimated = 0; let free = 0;
+    for (const turn of items) {
+      const input = turn.inputTokens ?? 0;
+      inputTokens += input; cachedInputTokens += Math.min(input, turn.cachedInputTokens ?? 0); outputTokens += turn.outputTokens ?? 0;
+      if (turn.costUsd !== null) { cost += turn.costUsd; known++; if (turn.costUsd === 0) free++; }
+      if (turn.costUsd === null || turn.costState === "partial" || turn.confidence === "medium") estimated++;
+    }
+    const costState: HistoricalCostState = known === 0 ? "unknown" : estimated > 0 ? "estimated" : free === known ? "free-model" : "exact";
+    const first = items[0];
+    return { key, provider: dimension === "model" ? first.provider : null, displayName: dimension === "model" ? first.displayName ?? first.model ?? key : key,
+      inputTokens, cachedInputTokens, freshInputTokens: inputTokens - cachedInputTokens, outputTokens, recordedTokens: inputTokens + outputTokens,
+      finalizedTurnCount: items.length, averageInputTokens: inputTokens / items.length, averageOutputTokens: outputTokens / items.length,
+      cachePercentage: inputTokens === 0 ? 0 : cachedInputTokens / inputTokens * 100, reportedCostUsd: known === 0 ? null : cost, costState };
+  }).sort((a, b) => b.recordedTokens - a.recordedTokens || a.key.localeCompare(b.key));
 }
 
 /** Projects persisted history only; live/provisional usage is deliberately not included. */
@@ -93,7 +138,7 @@ export function projectHistoricalUsage(
     if (turn.costUsd === null || turn.costState === "partial" || turn.confidence === "medium") estimated++;
   }
   const costState: HistoricalCostState = selected.length === 0 || known === 0 ? "unknown" : estimated > 0 ? "estimated" : free === known ? "free-model" : "exact";
-  return { range, from, to, turns: selected, inputTokens, cachedInputTokens, outputTokens, recordedTokens: inputTokens + outputTokens, reportedCostUsd: known === 0 ? null : cost, costState };
+  return { range, from, to, turns: selected, inputTokens, cachedInputTokens, outputTokens, recordedTokens: inputTokens + outputTokens, reportedCostUsd: known === 0 ? null : cost, costState, models: analytics(selected, "model"), workspaces: analytics(selected, "workspace") };
 }
 
 export const DEFAULT_USAGE_TURN_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;

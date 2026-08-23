@@ -129,6 +129,15 @@ describe("usage turn store", () => {
     expect(projectHistoricalUsage([turn({ costUsd: null, costState: "unknown" })], "30d", now).costState).toBe("unknown");
   });
 
+  it("projects canonical model and workspace analytics without mixing metadata", () => {
+    const result = projectHistoricalUsage([
+      turn({ turnId: "a", workspaceId: "workspace-b", model: "provider-alias", canonicalModelId: "model-1", provider: "Provider A", displayName: "Friendly model", inputTokens: 100, cachedInputTokens: 25, outputTokens: 20, costUsd: 1 }),
+      turn({ turnId: "b", workspaceId: "workspace-a", model: "provider-alias", canonicalModelId: "model-1", provider: "Provider A", displayName: "Friendly model", inputTokens: 50, cachedInputTokens: 25, outputTokens: 10, costUsd: 2 }),
+    ], "30d", Date.parse("2026-01-11T00:00:00.000Z"));
+    expect(result.models).toEqual([expect.objectContaining({ key: "model-1", provider: "Provider A", displayName: "Friendly model", finalizedTurnCount: 2, cachePercentage: 33.33333333333333, reportedCostUsd: 3, costState: "exact" })]);
+    expect(result.workspaces.map(({ key, reportedCostUsd }) => [key, reportedCostUsd])).toEqual([["workspace-a", 2], ["workspace-b", 1]]);
+  });
+
   it("round trips and replaces by full scope and turn identity", async () => {
     const first = storage();
     const store = createUsageTurnStore({ storage: first, now: () => Date.parse("2026-01-11T00:00:00.000Z") });
