@@ -20,6 +20,14 @@ export function observatoryLayout(width: number, compact: boolean): ObservatoryL
   return "wide";
 }
 
+export function selectedAgentMetadata(input: { workspaceName: string; model: string | null; finalizedTokens: number; costState: "complete" | "partial" | "unknown"; switchedModels: boolean }): string {
+  return `${input.workspaceName} · ${input.model ?? "Model unknown"} · ${input.finalizedTokens.toLocaleString()} finalized tokens · ${input.costState} cost${input.switchedModels ? " · switched model" : ""}`;
+}
+
+export function turnDisplayLabel(turn: { provisional: boolean }, index: number): string {
+  return turn.provisional ? "live" : `turn ${index + 1}`;
+}
+
 export function turnAccessibilityLabel(turn: { provisional: boolean; model: string | null; inputTokens: number | null; cachedInputTokens: number | null; outputTokens: number | null }): string {
   const input = turn.inputTokens ?? 0;
   const cached = Math.min(turn.cachedInputTokens ?? 0, input);

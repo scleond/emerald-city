@@ -9,7 +9,7 @@ import {
   type TelemetryDiagnostic,
 } from "./project-observation";
 import { observatoryDismissalContracts, type AttentionDismissalRecord } from "./dismissals";
-import { lifecycleStyle, modelUsageAccessibilityLabel, observatoryLayout, turnAccessibilityLabel, usageChartPalette } from "./accessibility";
+import { lifecycleStyle, modelUsageAccessibilityLabel, observatoryLayout, selectedAgentMetadata, turnAccessibilityLabel, turnDisplayLabel, usageChartPalette } from "./accessibility";
 
 export function AgentObservatoryPanel({
   theme,
@@ -585,7 +585,7 @@ function ActivityDetail({ timeline, onLoadMore, styles }: { timeline: TimelineSu
         </Text>
       ))}
       {timeline.hasOlder ? (
-        <Pressable onPress={onLoadMore}>
+        <Pressable onPress={onLoadMore} style={styles.touchTarget} accessibilityRole="button" accessibilityLabel="Load older activity">
           <Text style={styles.label}>Load more</Text>
         </Pressable>
       ) : null}
@@ -651,16 +651,15 @@ function AgentUsageDetail({
   const provisional = turns.find((turn) => turn.provisional);
   return (
     <View>
-      <Text style={styles.detailLine}>{workspaceName} · {model ?? "Model unknown"}</Text>
-      <Text style={styles.detailLine}>{finalizedTokens.toLocaleString()} finalized tokens · {costState} cost{switchedModels ? " · model switched" : ""}</Text>
+      <Text accessibilityLabel={selectedAgentMetadata({ workspaceName, model, finalizedTokens, costState, switchedModels })} style={styles.detailLine}>{selectedAgentMetadata({ workspaceName, model, finalizedTokens, costState, switchedModels })}</Text>
       {finalized.length === 0 && !provisional ? (
         <Text style={styles.detailLine}>No reported turn usage.</Text>
       ) : null}
       {turns.length > 0 ? (
-        <ScrollView horizontal contentContainerStyle={{ minWidth: Math.max(280, (turns.length || 1) * 56) }} showsHorizontalScrollIndicator={true}>
-        <View style={styles.turnRow} accessibilityLabel="Per-turn token usage">
+        <ScrollView horizontal accessibilityLabel="Per-turn token usage, scroll horizontally for more turns" contentContainerStyle={{ minWidth: Math.max(280, (turns.length || 1) * 56) }} showsHorizontalScrollIndicator={true}>
+        <View style={styles.turnRow}>
           {turns.map((turn, index) => (
-            <TurnColumn key={`${turn.turnId ?? "unknown"}-${index}`} turn={turn} styles={styles} maxTokens={maxTokens} />
+            <TurnColumn key={`${turn.turnId ?? "unknown"}-${index}`} turn={turn} index={index} styles={styles} maxTokens={maxTokens} />
           ))}
         </View>
         </ScrollView>
@@ -669,7 +668,7 @@ function AgentUsageDetail({
   );
 }
 
-function TurnColumn({ turn, styles, maxTokens }: { turn: ObservatoryAgentUsageTurn; styles: PanelStyles; maxTokens?: number }) {
+function TurnColumn({ turn, styles, maxTokens, index }: { turn: ObservatoryAgentUsageTurn; styles: PanelStyles; maxTokens?: number; index: number }) {
   const input = turn.inputTokens ?? 0;
   const cached = Math.min(turn.cachedInputTokens ?? 0, input);
   const fresh = Math.max(0, input - cached);
@@ -686,7 +685,7 @@ function TurnColumn({ turn, styles, maxTokens }: { turn: ObservatoryAgentUsageTu
         <View style={{ flex: (cached / total) || 0, ...styles.segmentCached }} />
         <View style={{ flex: (output / total) || 0, ...styles.segmentOutput }} />
       </View>
-      <Text style={styles.provisionalLabel}>{turn.provisional ? "live" : (turn.model ?? "?")}</Text>
+      <Text style={styles.provisionalLabel}>{turnDisplayLabel(turn, index)}</Text>
     </View>
   );
 }

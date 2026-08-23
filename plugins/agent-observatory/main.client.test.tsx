@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lifecycleStyle, modelUsageAccessibilityLabel, observatoryLayout, turnAccessibilityLabel, usageChartPalette } from "./accessibility";
+import { lifecycleStyle, modelUsageAccessibilityLabel, observatoryLayout, selectedAgentMetadata, turnAccessibilityLabel, turnDisplayLabel, usageChartPalette } from "./accessibility";
 import type { AgentLifecycle } from "./observation";
 
 it("projects every lifecycle to its own semantic style", () => {
@@ -23,8 +23,14 @@ describe("model usage accessibility", () => {
 });
 
 it("classifies widths deterministically and describes turn composition", () => {
-  expect([observatoryLayout(400, false), observatoryLayout(800, false), observatoryLayout(1200, false), observatoryLayout(1200, true)]).toEqual(["compact", "medium", "wide", "compact"]);
+  expect([observatoryLayout(599, false), observatoryLayout(600, false), observatoryLayout(959, false), observatoryLayout(960, false), observatoryLayout(1200, true)]).toEqual(["compact", "medium", "medium", "wide", "compact"]);
   expect(turnAccessibilityLabel({ provisional: true, model: "gpt-4", inputTokens: 12, cachedInputTokens: 8, outputTokens: 5 })).toBe("Live turn, model gpt-4: 17 total tokens. Composition: 4 fresh input, 8 cached input, 5 output.");
+});
+
+it("keeps selected-agent metadata compact and turn labels readable", () => {
+  expect(selectedAgentMetadata({ workspaceName: "Main", model: "gpt-4", finalizedTokens: 1234, costState: "partial", switchedModels: true })).toBe("Main · gpt-4 · 1,234 finalized tokens · partial cost · switched model");
+  expect(turnDisplayLabel({ provisional: false }, 2)).toBe("turn 3");
+  expect(turnDisplayLabel({ provisional: true }, 2)).toBe("live");
 });
 
 it("uses distinct theme-derived semantic colors for every usage segment", () => {
