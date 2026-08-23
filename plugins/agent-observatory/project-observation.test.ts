@@ -88,6 +88,28 @@ describe("ProjectObservationController", () => {
     controller.stop();
   });
 
+  it("isolates malformed stream events and keeps valid telemetry flowing", async () => {
+    const harness = createPaseoHarness();
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers());
+    await controller.start();
+    harness.publishTimeline("agent-1", null);
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", turnId: { secret: "nope" }, usage: { inputTokens: "not-a-number", prompt: "do not retain" } } });
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", turnId: "valid", usage: { inputTokens: 4 } } });
+    expect(controller.getSnapshot()).toMatchObject({ telemetry: { type: "turn_completed", turnId: "valid", usageFields: ["inputTokens"] }, view: { dashboard: { recordedTokens: 4 } } });
+    controller.stop();
+  });
+
+  it("makes lifecycle calls idempotent", async () => {
+    const harness = createPaseoHarness();
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers());
+    await controller.start();
+    await controller.start();
+    expect(harness.paseo.agents.subscribe).toHaveBeenCalledOnce();
+    controller.stop();
+    controller.stop();
+    expect(harness.unsubscribeAgent).toHaveBeenCalledOnce();
+  });
+
   it("records the last successful telemetry time and marks it stale using the injected clock", async () => {
     let clock = Date.parse("2026-08-22T12:00:00.000Z");
     const harness = createPaseoHarness();

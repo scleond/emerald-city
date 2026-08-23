@@ -437,14 +437,16 @@ export class ProjectObservationController {
   }
 
   private receiveAgentStream(payload: ObservatoryAgentStreamPayload): void {
-    if (!this.active || !this.agents.has(payload.agentId)) return;
+    if (!this.active || typeof payload !== "object" || payload === null || typeof payload.agentId !== "string" || !this.agents.has(payload.agentId)) return;
     const event = payload.event;
+    if (typeof event !== "object" || event === null || typeof event.type !== "string") return;
+    const eventFields = Object.keys(event).filter((key) => key !== "usage").sort();
     this.telemetry = {
       type: event.type,
-      turnId: event.turnId ?? null,
+      turnId: typeof event.turnId === "string" ? event.turnId : null,
       usagePresent: hasUsableUsage(event.usage),
-      usageFields: event.usage ? Object.keys(event.usage).sort() : [],
-      eventFields: Object.keys(event).filter((key) => key !== "usage").sort(),
+      usageFields: event.usage && typeof event.usage === "object" && !Array.isArray(event.usage) ? Object.keys(event.usage).sort() : [],
+      eventFields,
       health: event.type === "turn_completed" && hasUsableUsage(event.usage) ? "reported" : event.type === "usage_updated" && hasUsableUsage(event.usage) ? "pending" : "not-reported",
       lastSuccessAt: this.telemetryLastSuccessAt,
       stale: this.telemetryLastSuccessAt === null || this.now() - this.telemetryLastSuccessAt >= telemetryStaleAfterMs,

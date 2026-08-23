@@ -37,15 +37,21 @@ export interface AgentUsageRecord {
   provisionalTurns?: ObservatoryAgentUsageTurn[];
 }
 
-export function hasUsableUsage(usage: ObservatoryUsageFields | null | undefined): usage is ObservatoryUsageFields {
-  return usage !== null && usage !== undefined && Object.values(usage).some((value) => typeof value === "number" && Number.isFinite(value));
+export function hasUsableUsage(usage: unknown): usage is ObservatoryUsageFields {
+  return typeof usage === "object" && usage !== null && !Array.isArray(usage) && Object.values(usage).some((value) => typeof value === "number" && Number.isFinite(value));
 }
 
-export function normalizeUsageEvent(input: { type?: string; kind?: string; turnId?: unknown; model?: unknown; usage?: ObservatoryUsageFields | null; timestamp?: string; observedAt?: string }): AgentUsageEvent | null {
+export function normalizeUsageEvent(input: { type?: unknown; kind?: unknown; turnId?: unknown; model?: unknown; usage?: unknown; timestamp?: unknown; observedAt?: unknown }): AgentUsageEvent | null {
   const type = input.type ?? input.kind;
   if (type !== "usage_updated" && type !== "turn_completed") return null;
   if (!hasUsableUsage(input.usage)) return null;
-  return { kind: type === "turn_completed" ? "final" : "provisional", turnId: typeof input.turnId === "string" ? input.turnId : undefined, model: typeof input.model === "string" ? input.model : undefined, usage: input.usage, observedAt: input.timestamp ?? input.observedAt };
+  const usage = Object.fromEntries(Object.entries(input.usage).filter(([key, value]) => key in {
+    inputTokens: true, cachedInputTokens: true, outputTokens: true, totalCostUsd: true,
+    contextWindowUsedTokens: true, contextWindowMaxTokens: true,
+  } && typeof value === "number" && Number.isFinite(value))) as ObservatoryUsageFields;
+  if (!hasUsableUsage(usage)) return null;
+  const observedAt = input.timestamp ?? input.observedAt;
+  return { kind: type === "turn_completed" ? "final" : "provisional", turnId: typeof input.turnId === "string" ? input.turnId : undefined, model: typeof input.model === "string" ? input.model : undefined, usage, observedAt: typeof observedAt === "string" ? observedAt : undefined };
 }
 
 export function emptyAgentUsage(): AgentUsageRecord {
