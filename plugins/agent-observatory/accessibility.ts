@@ -1,6 +1,12 @@
-import type { ModelUsageBar } from "./observation";
+import type { AgentLifecycle, ModelUsageBar } from "./observation";
 
 export type ObservatoryLayout = "compact" | "medium" | "wide";
+
+export type LifecycleStyle = "active" | "waiting" | "finished" | "failed" | "other";
+
+export function lifecycleStyle(lifecycle: AgentLifecycle): LifecycleStyle {
+  return lifecycle;
+}
 
 export function observatoryLayout(width: number, compact: boolean): ObservatoryLayout {
   if (compact || width < 600) return "compact";

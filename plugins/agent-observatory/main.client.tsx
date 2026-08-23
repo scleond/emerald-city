@@ -9,7 +9,7 @@ import {
   type TelemetryDiagnostic,
 } from "./project-observation";
 import { observatoryDismissalContracts, type AttentionDismissalRecord } from "./dismissals";
-import { modelUsageAccessibilityLabel, observatoryLayout, turnAccessibilityLabel } from "./accessibility";
+import { lifecycleStyle, modelUsageAccessibilityLabel, observatoryLayout, turnAccessibilityLabel } from "./accessibility";
 
 export function AgentObservatoryPanel({
   theme,
@@ -144,8 +144,7 @@ export function AgentObservatoryPanel({
         gap: 3,
         paddingVertical: layout.compact ? 8 : 10,
         paddingHorizontal: 8,
-        borderBottomWidth: 1,
-        borderBottomColor: theme.colors.foregroundMuted,
+        borderBottomWidth: 0.5,
       },
       workspace: {
         gap: layout.compact ? 4 : 6,
@@ -173,6 +172,12 @@ export function AgentObservatoryPanel({
       lifecycleWaiting: { color: theme.colors.accentForeground, fontWeight: "600" as const },
       lifecycleFailed: { color: theme.colors.statusDanger, fontWeight: "600" as const },
       lifecycleFinished: { color: theme.colors.foregroundMuted, fontWeight: "600" as const },
+      lifecycleOther: { color: theme.colors.foreground, fontWeight: "600" as const },
+      rowActive: { borderBottomColor: theme.colors.accent },
+      rowWaiting: { borderBottomColor: theme.colors.accentForeground },
+      rowFinished: { borderBottomColor: theme.colors.foregroundMuted },
+      rowFailed: { borderBottomColor: theme.colors.statusDanger },
+      rowOther: { borderBottomColor: theme.colors.foreground },
       attentionRow: {
         gap: 2,
         paddingVertical: layout.compact ? 8 : 10,
@@ -393,6 +398,12 @@ interface PanelStyles {
   lifecycleWaiting: TextStyle;
   lifecycleFailed: TextStyle;
   lifecycleFinished: TextStyle;
+  lifecycleOther: TextStyle;
+  rowActive: ViewStyle;
+  rowWaiting: ViewStyle;
+  rowFinished: ViewStyle;
+  rowFailed: ViewStyle;
+  rowOther: ViewStyle;
   attentionRow: ViewStyle;
   reasonUserInput: TextStyle;
   reasonFailure: TextStyle;
@@ -437,6 +448,22 @@ const ATTENTION_REASON_STYLES: Record<AttentionReasonKind, keyof PanelStyles> = 
   user_input: "reasonUserInput",
   failure: "reasonFailure",
   inactivity: "reasonInactivity",
+};
+
+const LIFECYCLE_TEXT_STYLES: Record<AgentLifecycle, keyof PanelStyles> = {
+  active: "lifecycleActive",
+  waiting: "lifecycleWaiting",
+  finished: "lifecycleFinished",
+  failed: "lifecycleFailed",
+  other: "lifecycleOther",
+};
+
+const LIFECYCLE_ROW_STYLES: Record<AgentLifecycle, keyof PanelStyles> = {
+  active: "rowActive",
+  waiting: "rowWaiting",
+  finished: "rowFinished",
+  failed: "rowFailed",
+  other: "rowOther",
 };
 
 function AttentionQueue({ attention, titles, styles, selectAgent, onDismiss, expanded, onToggle }: { attention: AttentionEntry[]; titles: Map<string, string>; styles: PanelStyles; selectAgent: (id: string) => void; onDismiss: (entry: AttentionEntry) => void; expanded: boolean; onToggle: () => void }) {
@@ -525,9 +552,9 @@ function ReadyContent({ view, styles, telemetry, lifecycle, setLifecycle, select
             <Text accessibilityRole="header" style={styles.sectionTitle}>Delegation tree</Text>
             <View accessibilityLabel="Agent lifecycle filters" style={styles.filterLine}>{(["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(value => <Pressable key={value} style={styles.touchTarget} accessibilityRole="checkbox" accessibilityState={{ checked: lifecycle === value }} onPress={() => setLifecycle(lifecycle === value ? undefined : value)}><Text style={styles.label}>{lifecycle === value ? `✓ ${value}` : value}</Text></Pressable>)}</View>
            {view.dashboard.agents.length === 0 ? <Text style={styles.subtitle}>No agents</Text> : view.dashboard.agents.map((agent) => (
-              <Pressable key={agent.id} onPress={() => selectAgent(agent.id)} accessibilityRole="button" accessibilityLabel={`${agent.title}, ${agent.model ?? "model unknown"}, ${agent.usage.finalizedTurnCount} finalized turns, ${agent.lifecycle}, depth ${agent.depth}`} style={[styles.row, styles.touchTarget, agent.id === selectedAgentId ? styles.agentPressable : undefined]}>
-                <Text style={[styles.agentTitle, agent.lifecycle === "failed" ? styles.lifecycleFailed : agent.lifecycle === "active" ? styles.lifecycleActive : agent.lifecycle === "waiting" ? styles.lifecycleWaiting : styles.lifecycleFinished, { marginLeft: agent.depth * 12 }]}>{agent.title}</Text>
-                <Text style={styles.status}><Text style={styles.agentModel}>{agent.model ?? "Model unknown"}</Text> · {agent.usage.recordedTokens.toLocaleString()} finalized tokens · <Text style={agent.lifecycle === "failed" ? styles.lifecycleFailed : agent.lifecycle === "active" ? styles.lifecycleActive : agent.lifecycle === "waiting" ? styles.lifecycleWaiting : styles.lifecycleFinished}>{agent.lifecycle}</Text></Text>
+              <Pressable key={agent.id} onPress={() => selectAgent(agent.id)} accessibilityRole="button" accessibilityLabel={`${agent.title}, ${agent.model ?? "model unknown"}, ${agent.usage.finalizedTurnCount} finalized turns, ${agent.lifecycle}, depth ${agent.depth}`} style={[styles.row, styles[LIFECYCLE_ROW_STYLES[agent.lifecycle]], styles.touchTarget, agent.id === selectedAgentId ? styles.agentPressable : undefined]}>
+                <Text style={[styles.agentTitle, styles[LIFECYCLE_TEXT_STYLES[lifecycleStyle(agent.lifecycle)]], { marginLeft: agent.depth * 12 }]}>{agent.title}</Text>
+                <Text style={styles.status}><Text style={styles.agentModel}>{agent.model ?? "Model unknown"}</Text> · {agent.usage.recordedTokens.toLocaleString()} finalized tokens · <Text style={styles[LIFECYCLE_TEXT_STYLES[lifecycleStyle(agent.lifecycle)]]}>{agent.lifecycle}</Text></Text>
              </Pressable>
            ))}
          </View>

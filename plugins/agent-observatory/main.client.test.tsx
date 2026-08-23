@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { modelUsageAccessibilityLabel, observatoryLayout, turnAccessibilityLabel } from "./accessibility";
+import { lifecycleStyle, modelUsageAccessibilityLabel, observatoryLayout, turnAccessibilityLabel } from "./accessibility";
+import type { AgentLifecycle } from "./observation";
+
+it("projects every lifecycle to its own semantic style", () => {
+  const lifecycles: AgentLifecycle[] = ["active", "waiting", "finished", "failed", "other"];
+  expect(lifecycles.map(lifecycleStyle)).toEqual(lifecycles);
+});
 
 describe("model usage accessibility", () => {
   it("describes every chart segment and cost state", () => {
