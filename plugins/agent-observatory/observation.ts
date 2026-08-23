@@ -247,9 +247,20 @@ export function createProjectObservation(project: ObservatoryProject, workspaceS
   return { project, counts, models: aggregateModelUsage(agents.map((agent) => ({ model: agent.model, usage: { finalizedTurns: agent.usageTurns, provisionalTurn: null } }))), dashboard: projectDashboard(agents, workspaces), workspaces };
 }
 function treeOrder(agents: ObservatoryAgentView[]): ObservatoryAgentView[] {
-  const children = new Map<string, ObservatoryAgentView[]>(); const roots: ObservatoryAgentView[] = [];
   const ids = new Set(agents.map((agent) => agent.id));
-  for (const a of agents) { const p = a.parentId && ids.has(a.parentId) ? a.parentId : null; if (p) (children.get(p) ?? (children.set(p, []), children.get(p)!)).push(a); else roots.push(a); }
+  const parentIds = new Map(agents.map((agent) => [agent.id, agent.parentId && ids.has(agent.parentId) ? agent.parentId : null]));
+  const broken = new Set<string>();
+  for (const agent of agents) {
+    const path: string[] = []; const positions = new Map<string, number>(); let current: string | null = agent.id;
+    while (current && !positions.has(current) && !broken.has(current)) {
+      positions.set(current, path.length); path.push(current); current = parentIds.get(current) ?? null;
+    }
+    if (current && positions.has(current)) {
+      broken.add([...path.slice(positions.get(current)!)].sort()[0]!);
+    }
+  }
+  const children = new Map<string, ObservatoryAgentView[]>(); const roots: ObservatoryAgentView[] = [];
+  for (const a of agents) { const p = broken.has(a.id) ? null : parentIds.get(a.id) ?? null; if (p) (children.get(p) ?? (children.set(p, []), children.get(p)!)).push(a); else roots.push(a); }
   const out: ObservatoryAgentView[] = []; const visit = (a: ObservatoryAgentView, depth: number) => { a.depth = depth; out.push(a); for (const child of (children.get(a.id) ?? []).sort(compareAgents)) visit(child, depth + 1); };
   for (const root of roots.sort(compareAgents)) visit(root, 0); return out;
 }

@@ -119,6 +119,17 @@ describe("createProjectObservation", () => {
     expect(filtered.dashboard.agents[0]).toMatchObject({ id: "child", parentId: "parent", parentTitle: "parent", depth: 0 });
   });
 
+  it("keeps self-parenting and cyclic delegation links as deterministic roots", () => {
+    const view = createProjectObservation({ id: "project-1", name: "Project" }, [workspace("workspace-1", "Main")], [
+      agent("b", "running", { labels: { "paseo.parent-agent-id": "a" } }),
+      agent("a", "running", { labels: { "paseo.parent-agent-id": "b" } }),
+      agent("self", "running", { labels: { "paseo.parent-agent-id": "self" } }),
+    ]);
+    expect(view.dashboard.agents.map((item) => [item.id, item.depth, item.parentId])).toEqual([
+      ["a", 0, "b"], ["b", 1, "a"], ["self", 0, "self"],
+    ]);
+  });
+
   it("normalizes supported and unknown timeline activity", () => {
     expect(normalizeTimelineEntry({ item: { type: "user_message", text: "hello" } }).category).toBe("message");
     expect(normalizeTimelineEntry({ item: { type: "tool_call", status: "ok" } }).category).toBe("tool_activity");
