@@ -228,6 +228,7 @@ describe("ProjectObservationController", () => {
 
   it("re-establishes directory subscriptions when a disconnected host recovers", async () => {
     const harness = createPaseoHarness({ error: new Error("WebSocket disconnected") });
+    let clock = 0;
     let retry = () => undefined;
     const controller = new ProjectObservationController(harness.paseo, "workspace-1", {
       setInterval: vi.fn((callback) => {
@@ -235,11 +236,12 @@ describe("ProjectObservationController", () => {
         return 42;
       }),
       clearInterval: vi.fn(),
-    });
+    }, () => clock);
     await controller.start();
     expect(controller.getSnapshot().phase).toBe("disconnected");
 
     harness.recover();
+    clock = 1_000;
     retry();
     await vi.waitFor(() => expect(controller.getSnapshot().phase).toBe("ready"));
 
@@ -249,6 +251,44 @@ describe("ProjectObservationController", () => {
     expect(harness.paseo.agents.list).toHaveBeenLastCalledWith(
       expect.objectContaining({ subscribe: {} }),
     );
+    controller.stop();
+  });
+
+  it("backs off recoverable refreshes, exposes exhaustion, and retries again when the window opens", async () => {
+    let clock = 0;
+    let retry = () => undefined;
+    const harness = createPaseoHarness();
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", {
+      setInterval: vi.fn((callback) => { retry = callback; return 42; }),
+      clearInterval: vi.fn(),
+    }, () => clock);
+    await controller.start();
+    harness.fail(new Error("WebSocket disconnected"));
+    const tick = async () => { retry(); await new Promise((resolve) => setTimeout(resolve, 0)); };
+
+    clock = 999;
+    await tick();
+    await vi.waitFor(() => expect(harness.paseo.workspaces.list).toHaveBeenCalledTimes(2));
+    expect(controller.getSnapshot().phase).toBe("ready");
+    clock = 1_999;
+    await tick();
+    expect(harness.paseo.workspaces.list).toHaveBeenCalledTimes(3);
+
+    clock = 2_999;
+    await tick();
+    expect(harness.paseo.workspaces.list).toHaveBeenCalledTimes(3);
+    clock = 3_999;
+    await tick();
+    await vi.waitFor(() => expect(harness.paseo.workspaces.list).toHaveBeenCalledTimes(4));
+    clock = 7_999;
+    await tick();
+    await vi.waitFor(() => expect(harness.paseo.workspaces.list).toHaveBeenCalledTimes(5));
+
+    harness.recover();
+    clock = 15_999;
+    await tick();
+    await vi.waitFor(() => expect(controller.getSnapshot().phase).toBe("ready"));
+    expect(harness.paseo.workspaces.list).toHaveBeenCalledTimes(6);
     controller.stop();
   });
 
@@ -380,6 +420,9 @@ function createPaseoHarness(options: {
     publishTimeline: (agentId: string, payload: unknown) => timelineHandlers.get(agentId)?.(payload),
     recover: () => {
       currentError = undefined;
+    },
+    fail: (error: Error) => {
+      currentError = error;
     },
   };
 }

@@ -164,6 +164,8 @@ export class ProjectObservationController {
     this.timelineRetries.clear();
     this.refreshRetries = 0;
     this.nextRefreshAt = 0;
+    this.telemetry = undefined;
+    this.telemetryLastSuccessAt = null;
     this.directorySubscriptionsActive = false;
     if (this.timer !== null) {
       this.timers.clearInterval(this.timer);
@@ -234,6 +236,7 @@ export class ProjectObservationController {
 
   private async refresh(subscribe: boolean): Promise<void> {
     if (this.refreshing || !this.active) return;
+    if (!subscribe && this.now() < this.nextRefreshAt) return;
     this.refreshing = true;
     const shouldSubscribe = subscribe || !this.directorySubscriptionsActive;
     try {
