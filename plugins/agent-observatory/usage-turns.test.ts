@@ -31,15 +31,22 @@ describe("usage turn store", () => {
     expect(record.provisionalTurns).toHaveLength(2);
   });
 
+  it("does not consume a mismatched anonymous provisional", () => {
+    const provisional = reduceAgentUsage(emptyAgentUsage(), { kind: "provisional", model: "model", usage: { inputTokens: 10 } });
+    const result = reduceAgentUsage(provisional, { kind: "final", model: "model", usage: { inputTokens: 20 } });
+    expect(result.provisionalTurns).toHaveLength(1);
+    expect(result.finalizedTurns).toHaveLength(1);
+  });
+
   it("replaces an anonymous provisional turn with its final event", () => {
     const provisional = reduceAgentUsage(emptyAgentUsage(), { kind: "provisional", model: "model", usage: { inputTokens: 10 } });
-    const final = reduceAgentUsage(provisional, { kind: "final", model: "model", usage: { inputTokens: 10, outputTokens: 2 } });
+    const final = reduceAgentUsage(provisional, { kind: "final", model: "model", usage: { inputTokens: 10 } });
     expect(final.provisionalTurn).toBeNull();
     expect(final.finalizedTurns).toHaveLength(1);
   });
 
   it("clears an anonymous provisional when the final event has an identity", () => {
-    const provisional = reduceAgentUsage(emptyAgentUsage(), { kind: "provisional", model: "model", usage: { inputTokens: 10 } });
+    const provisional = reduceAgentUsage(emptyAgentUsage(), { kind: "provisional", turnId: "generated-turn", model: "model", usage: { inputTokens: 10 } });
     const final = reduceAgentUsage(provisional, { kind: "final", turnId: "generated-turn", model: "model", usage: { inputTokens: 10, outputTokens: 2 } });
     expect(final.provisionalTurn).toBeNull();
     expect(final.finalizedTurns).toEqual([expect.objectContaining({ turnId: "generated-turn" })]);

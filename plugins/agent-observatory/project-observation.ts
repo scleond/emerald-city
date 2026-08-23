@@ -467,7 +467,7 @@ export class ProjectObservationController {
     const queue = matching && matching.length > 0 ? matching : [...identities.values()].find((items) => items.length > 0);
     const identity = queue?.shift();
     if (matching && matching.length === 0) identities.delete(key);
-    return identity;
+    return identity ?? `final:${key}`;
   }
 
   private async persistUsage(agentId: string, event: AgentUsageEvent, fallbackModel: string | null, persistenceId?: string, observedAt = new Date(this.now()).toISOString()): Promise<void> {

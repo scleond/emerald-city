@@ -111,8 +111,8 @@ export function reduceAgentUsage(
   finalized.push(next);
   const provisional = [...(record.provisionalTurns ?? (record.provisionalTurn ? [record.provisionalTurn] : []))];
   const matching = event.turnId
-    ? (() => { const identified = provisional.findIndex((turn) => turn.turnId === event.turnId); return identified >= 0 ? identified : provisional.findIndex((turn) => turn.turnId === null); })()
-    : provisional.findIndex((turn) => turn.turnId === null);
+    ? provisional.findIndex((turn) => turn.turnId === event.turnId)
+    : provisional.findIndex((turn) => turnIdentity(turn) === identity);
   if (matching >= 0) provisional.splice(matching, 1);
   return {
     finalizedTurns: finalized,
