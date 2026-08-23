@@ -15,6 +15,7 @@ import {
 } from "./observation";
 import { normalizeTimelineEntry, TIMELINE_DETAIL_LIMIT, TIMELINE_SUMMARY_LIMIT, type AgentLifecycle, type NormalizedTimelineEntry, type RawTimelineEntry } from "./observation";
 import type { AttentionDismissalRecord } from "./dismissals";
+import type { NormalizedUsageTurn, UsageTurnStore } from "./usage-turns";
 
 export interface ObservatoryDismissalApi {
   get(projectId: string): Promise<readonly AttentionDismissalRecord[]>;
@@ -76,6 +77,7 @@ export class ProjectObservationController {
   private dismissals: AttentionDismissalRecord[] = [];
   private dismissalError?: string;
   private readonly dismissalApi?: ObservatoryDismissalApi;
+  private readonly usageStore?: UsageTurnStore;
   private telemetry?: TelemetryDiagnostic;
 
   constructor(
@@ -87,8 +89,10 @@ export class ProjectObservationController {
     },
     private readonly now: () => number = () => Date.now(),
     dismissalApi?: ObservatoryDismissalApi,
+    usageStore?: UsageTurnStore,
   ) {
     this.dismissalApi = dismissalApi;
+    this.usageStore = usageStore;
   }
 
   getSnapshot = (): ProjectObservationState => this.state;
@@ -250,6 +254,7 @@ export class ProjectObservationController {
         // syncDismissals handles its own error state; keep ready phase
       }
       for (const agent of this.agents.values()) void this.loadTimelineSummary(agent.id);
+      await Promise.all([...this.agents.values()].map((agent) => this.restoreUsage(agent.id)));
       if (this.workspaces.size === 0) {
         this.publish({
           phase: "unavailable",
@@ -311,6 +316,20 @@ export class ProjectObservationController {
       this.usage.set(agentId, emptyAgentUsage());
     }
     this.subscribeAgentStream(agentId);
+  }
+
+  private async restoreUsage(agentId: string): Promise<void> {
+    if (!this.usageStore || !this.project) return;
+    const agent = this.agents.get(agentId);
+    if (!agent) return;
+    try {
+      const turns = await this.usageStore.get({ projectId: this.project.id, workspaceId: agent.workspaceId, agentId });
+      let record = emptyAgentUsage();
+      for (const turn of turns) {
+        record = reduceAgentUsage(record, { kind: turn.confidence === "low" ? "provisional" : "final", turnId: turn.turnId, model: turn.model, usage: { inputTokens: turn.inputTokens ?? undefined, cachedInputTokens: turn.cachedInputTokens ?? undefined, outputTokens: turn.outputTokens ?? undefined, totalCostUsd: turn.costUsd ?? undefined, contextWindowUsedTokens: turn.contextUsedTokens ?? undefined, contextWindowMaxTokens: turn.contextMaxTokens ?? undefined } }, this.agentModels.get(agentId) ?? null);
+      }
+      this.usage.set(agentId, record);
+    } catch { /* malformed persisted data must not prevent live ingestion */ }
   }
 
   private removeAgent(agentId: string, isExplicitRemoval = false): void {
@@ -397,6 +416,7 @@ export class ProjectObservationController {
       payload.agentId,
       reduceAgentUsage(this.usage.get(payload.agentId) ?? emptyAgentUsage(), usageEvent, model),
     );
+    void this.persistUsage(payload.agentId, usageEvent, model);
     this.publishReady();
   }
 
@@ -413,7 +433,24 @@ export class ProjectObservationController {
         usage,
       };
       this.usage.set(agentId, reduceAgentUsage(this.usage.get(agentId) ?? emptyAgentUsage(), event, this.agentModels.get(agentId) ?? null));
+      void this.persistUsage(agentId, event, event.model ?? this.agentModels.get(agentId) ?? null, entry.timestamp);
     }
+  }
+
+  private async persistUsage(agentId: string, event: AgentUsageEvent, fallbackModel: string | null, observedAt = new Date(this.now()).toISOString()): Promise<void> {
+    if (!this.usageStore || !this.project) return;
+    const agent = this.agents.get(agentId);
+    if (!agent || !event.usage) return;
+    const usage = event.usage;
+    const turn: NormalizedUsageTurn = {
+      projectId: this.project.id, workspaceId: agent.workspaceId, agentId,
+      turnId: event.turnId ?? `fallback:${observedAt}:${event.model ?? fallbackModel ?? "unknown"}`,
+      observedAt, startedAt: null, completedAt: event.kind === "final" ? observedAt : null,
+      model: event.model ?? fallbackModel, inputTokens: usage.inputTokens ?? null, cachedInputTokens: usage.cachedInputTokens ?? null,
+      outputTokens: usage.outputTokens ?? null, contextUsedTokens: usage.contextWindowUsedTokens ?? null, contextMaxTokens: usage.contextWindowMaxTokens ?? null,
+      costUsd: usage.totalCostUsd ?? null, costState: usage.totalCostUsd === undefined ? "unknown" : "complete", confidence: event.kind === "final" ? "high" : "low",
+    };
+    try { await this.usageStore.put(turn); } catch { /* invalid records are ignored */ }
   }
 
   private publishReady(): void {

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ProjectObservationController, type ObservatoryPaseoApi } from "./project-observation";
+import type { NormalizedUsageTurn, UsageTurnStore } from "./usage-turns";
 
 describe("ProjectObservationController", () => {
   it("publishes project agents grouped by active workspace and releases resources", async () => {
@@ -64,6 +65,26 @@ describe("ProjectObservationController", () => {
     expect(controller.getSnapshot()).toMatchObject({ phase: "ready", view: { dashboard: { recordedTokens: 13, reportedCostUsd: 0.12 } } });
     const snapshot = controller.getSnapshot();
     if (snapshot.phase === "ready") expect(snapshot.view.dashboard.agents).toEqual(expect.arrayContaining([expect.objectContaining({ id: "agent-1", usage: expect.objectContaining({ recordedTokens: 13 }) })]));
+    controller.stop();
+  });
+
+  it("persists live turns and replaces a provisional turn by identity", async () => {
+    const stored: NormalizedUsageTurn[] = [];
+    const usageStore: UsageTurnStore = {
+      async get(scope) { return stored.filter((turn) => turn.projectId === scope.projectId && turn.workspaceId === scope.workspaceId && turn.agentId === scope.agentId); },
+      async put(turn) {
+        const index = stored.findIndex((candidate) => candidate.projectId === turn.projectId && candidate.workspaceId === turn.workspaceId && candidate.agentId === turn.agentId && candidate.turnId === turn.turnId);
+        if (index >= 0) stored[index] = turn; else stored.push(turn);
+        return stored;
+      },
+    };
+    const harness = createPaseoHarness();
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers(), undefined, undefined, usageStore);
+    await controller.start();
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "usage_updated", turnId: "turn-1", usage: { inputTokens: 10 } } });
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", turnId: "turn-1", usage: { inputTokens: 12, outputTokens: 3 } } });
+    await vi.waitFor(() => expect(stored).toHaveLength(1));
+    expect(stored[0]).toMatchObject({ turnId: "turn-1", confidence: "high", inputTokens: 12, outputTokens: 3 });
     controller.stop();
   });
 
