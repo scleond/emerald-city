@@ -12,9 +12,9 @@ export const NormalizedUsageTurnSchema = z.object({
   startedAt: z.iso.datetime({ offset: true }).nullable(),
   completedAt: z.iso.datetime({ offset: true }).nullable(),
   model: z.string().min(1).nullable(),
-  canonicalModelId: z.string().min(1).nullable().default(null),
-  provider: z.string().min(1).nullable().default(null),
-  displayName: z.string().min(1).nullable().default(null),
+  canonicalModelId: z.string().min(1).nullable().optional(),
+  provider: z.string().min(1).nullable().optional(),
+  displayName: z.string().min(1).nullable().optional(),
   inputTokens: nullableNumber,
   cachedInputTokens: nullableNumber,
   outputTokens: nullableNumber,
@@ -106,7 +106,7 @@ function analytics(turns: readonly NormalizedUsageTurn[], dimension: "model" | "
     }
     const costState: HistoricalCostState = known === 0 ? "unknown" : estimated > 0 ? "estimated" : free === known ? "free-model" : "exact";
     const first = items[0];
-    return { key, provider: dimension === "model" ? first.provider : null, displayName: dimension === "model" ? first.displayName ?? first.model ?? key : key,
+    return { key, provider: dimension === "model" ? first.provider ?? null : null, displayName: dimension === "model" ? first.displayName ?? first.model ?? key : key,
       inputTokens, cachedInputTokens, freshInputTokens: inputTokens - cachedInputTokens, outputTokens, recordedTokens: inputTokens + outputTokens,
       finalizedTurnCount: items.length, averageInputTokens: inputTokens / items.length, averageOutputTokens: outputTokens / items.length,
       cachePercentage: inputTokens === 0 ? 0 : cachedInputTokens / inputTokens * 100, reportedCostUsd: known === 0 ? null : cost, costState };
