@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createUsageTurnStore, projectHistoricalUsage, type UsageTurnFileStorage, type NormalizedUsageTurn } from "./usage-turns";
+import { historySourceLabel, sanitizedUsageExport } from "./usage-history";
 
 function storage(initial: string | null = null): UsageTurnFileStorage & { value: string | null } {
   return { value: initial, async read() { return this.value; }, async write(data) { this.value = data; } };
@@ -9,6 +10,16 @@ function turn(overrides: Partial<NormalizedUsageTurn> = {}): NormalizedUsageTurn
 }
 
 describe("usage turn store", () => {
+  it("exports only normalized usage fields", () => {
+    const turn = { projectId: "p", workspaceId: "w", agentId: "a", turnId: "t", observedAt: "2026-01-01T00:00:00.000Z", startedAt: null, completedAt: null, model: "model", inputTokens: 1, cachedInputTokens: 0, outputTokens: 2, contextUsedTokens: null, contextMaxTokens: null, costUsd: null, costState: "unknown", confidence: "high" } satisfies NormalizedUsageTurn;
+    expect(sanitizedUsageExport([{ ...turn, prompt: "secret", payload: { password: "secret" } } as NormalizedUsageTurn])).toBe(JSON.stringify({ version: 1, turns: [turn] }));
+  });
+
+  it("labels history as local and reports the newest data age", () => {
+    const turn = { projectId: "p", workspaceId: "w", agentId: "a", turnId: "t", observedAt: "2026-01-01T00:00:00.000Z", startedAt: null, completedAt: null, model: "model", inputTokens: 1, cachedInputTokens: 0, outputTokens: 2, contextUsedTokens: null, contextMaxTokens: null, costUsd: null, costState: "unknown", confidence: "high" } satisfies NormalizedUsageTurn;
+    expect(historySourceLabel(projectHistoricalUsage([turn], "24h", Date.parse("2026-01-01T12:00:00.000Z")))).toContain("Locally observed");
+  });
+
   it("projects fixed inclusive ranges in deterministic order and keeps history separate", () => {
     const now = Date.parse("2026-02-10T00:00:00.000Z");
     const result = projectHistoricalUsage([

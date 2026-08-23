@@ -10,6 +10,8 @@ import {
 } from "./project-observation";
 import { observatoryDismissalContracts, type AttentionDismissalRecord } from "./dismissals";
 import { lifecycleStyle, modelUsageAccessibilityLabel, observatoryLayout, selectedAgentMetadata, turnAccessibilityLabel, turnDisplayLabel, usageChartPalette } from "./accessibility";
+import { USAGE_RANGE_LABELS } from "./usage-history";
+import type { UsageRange } from "./usage-turns";
 
 export function AgentObservatoryPanel({
   theme,
@@ -54,6 +56,7 @@ export function AgentObservatoryPanel({
   const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(null);
   const [secondaryOpen, setSecondaryOpen] = React.useState(false);
   const [attentionOpen, setAttentionOpen] = React.useState(false);
+  const [historyRange, setHistoryRange] = React.useState<UsageRange>("24h");
   useEffect(() => { controller.setFilters(query, lifecycle ? [lifecycle] : []); }, [controller, query, lifecycle]);
   useEffect(() => {
     if (state.phase === "ready") {
@@ -373,7 +376,7 @@ export function AgentObservatoryPanel({
         <Text accessibilityRole="header" style={styles.title}>Agent Observatory</Text>
         <TextInput accessibilityLabel="Search workspaces or agents" placeholder="Search" value={query} onChangeText={setQuery} style={styles.searchInput} />
       </View>
-      <StateContent state={state} styles={styles} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} attentionOpen={attentionOpen} toggleAttention={() => setAttentionOpen(!attentionOpen)} />
+      <StateContent state={state} styles={styles} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} attentionOpen={attentionOpen} toggleAttention={() => setAttentionOpen(!attentionOpen)} historyRange={historyRange} setHistoryRange={setHistoryRange} />
     </ScrollView>
   );
 }
@@ -498,7 +501,7 @@ function AttentionQueue({ attention, titles, styles, selectAgent, onDismiss, exp
   );
 }
 
-function StateContent({ state, styles, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, onDismiss, attentionOpen, toggleAttention }: { state: ProjectObservationState; styles: PanelStyles; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
+function StateContent({ state, styles, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, onDismiss, attentionOpen, toggleAttention, historyRange, setHistoryRange }: { state: ProjectObservationState; styles: PanelStyles; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void; historyRange: UsageRange; setHistoryRange: (range: UsageRange) => void }) {
   if (state.phase === "loading") {
     return <Text style={styles.subtitle}>Loading project agents…</Text>;
   }
@@ -518,10 +521,10 @@ function StateContent({ state, styles, lifecycle, setLifecycle, selectedAgentId,
       </View>
     );
   }
-  return <ReadyContent view={state.view} styles={styles} telemetry={state.telemetry} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} onDismiss={onDismiss} attentionOpen={attentionOpen} toggleAttention={toggleAttention} />;
+  return <ReadyContent view={state.view} styles={styles} telemetry={state.telemetry} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} onDismiss={onDismiss} attentionOpen={attentionOpen} toggleAttention={toggleAttention} historyRange={historyRange} setHistoryRange={setHistoryRange} />;
 }
 
-function ReadyContent({ view, styles, telemetry, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, timeline, attention, onDismiss, attentionOpen, toggleAttention }: { view: ObservatoryViewModel; styles: PanelStyles; telemetry?: TelemetryDiagnostic; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[]; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
+function ReadyContent({ view, styles, telemetry, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, timeline, attention, onDismiss, attentionOpen, toggleAttention, historyRange, setHistoryRange }: { view: ObservatoryViewModel; styles: PanelStyles; telemetry?: TelemetryDiagnostic; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[]; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void; historyRange: UsageRange; setHistoryRange: (range: UsageRange) => void }) {
   const agentCount = view.workspaces.reduce((total, workspace) => total + workspace.agents.length, 0);
   const titles = new Map(view.workspaces.flatMap((workspace) => workspace.agents.map((agent) => [agent.id, agent.title] as const)));
   return (
@@ -530,6 +533,7 @@ function ReadyContent({ view, styles, telemetry, lifecycle, setLifecycle, select
        <Text style={styles.subtitle}>Project-wide token usage across active workspaces.</Text>
        <Text style={styles.label}>{view.workspaces.length} workspaces · {agentCount} agents</Text>
        <DashboardSummary dashboard={view.dashboard} styles={styles} />
+       <View accessibilityLabel="Usage history controls" style={styles.secondary}><Text accessibilityRole="header" style={styles.sectionTitle}>Usage history</Text><Text style={styles.label}>Locally observed history; live projections are not included.</Text><View style={styles.toolbar}>{(Object.keys(USAGE_RANGE_LABELS) as UsageRange[]).map((range) => <Pressable key={range} accessibilityRole="radio" accessibilityState={{ selected: historyRange === range }} accessibilityLabel={`Show ${USAGE_RANGE_LABELS[range]} usage history`} onPress={() => setHistoryRange(range)} style={styles.touchTarget}><Text style={styles.label}>{historyRange === range ? `✓ ${USAGE_RANGE_LABELS[range]}` : USAGE_RANGE_LABELS[range]}</Text></Pressable>)}</View><Text style={styles.label}>Selected range: {USAGE_RANGE_LABELS[historyRange]}</Text></View>
       <View accessibilityLabel="Agent lifecycle summary" style={styles.summary}>
         {view.counts.map(({ label, count }) => (
           <View key={label} accessibilityLabel={`${label}: ${count}`}>
