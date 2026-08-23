@@ -86,6 +86,11 @@ export function finalizedTurnScale(turns: readonly ObservatoryAgentUsageTurn[]):
   return Math.max(...turns.filter((turn) => !turn.provisional).map((turn) => (turn.inputTokens ?? 0) + (turn.outputTokens ?? 0)), 1);
 }
 
+export function turnBarHeight(turn: ObservatoryAgentUsageTurn, scale: number): number {
+  const total = Math.max((turn.inputTokens ?? 0) + (turn.outputTokens ?? 0), 1);
+  return Math.min(120, Math.max(24, Math.round((total / Math.max(scale, 1)) * 120)));
+}
+
 export function selectedAgentAfterProjection(selectedAgentId: string | null, agents: readonly { id: string }[]): string | null {
   return selectedAgentId && agents.some((agent) => agent.id === selectedAgentId) ? selectedAgentId : null;
 }

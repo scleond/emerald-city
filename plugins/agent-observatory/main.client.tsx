@@ -1,7 +1,7 @@
 import { type PluginWorkspacePanelProps, usePaseo, useRpc } from "@getpaseo/plugin";
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Pressable, ScrollView, Text, TextInput, View, type TextStyle, type ViewStyle } from "react-native";
-import { ATTENTION_REASON_LABELS, finalizedTurnScale, selectedAgentAfterProjection, type AgentLifecycle, type AttentionEntry, type AttentionReasonKind, type ModelUsageBar, type ObservatoryAgentUsageTurn } from "./observation";
+import { ATTENTION_REASON_LABELS, finalizedTurnScale, selectedAgentAfterProjection, turnBarHeight, type AgentLifecycle, type AttentionEntry, type AttentionReasonKind, type ModelUsageBar, type ObservatoryAgentUsageTurn } from "./observation";
 import type { ObservatoryViewModel } from "./observation";
 import {
   ProjectObservationController,
@@ -450,7 +450,7 @@ function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, ti
          </View>
          <View accessibilityLabel="Selected agent usage" style={styles.detailPanel}>
            <Text accessibilityRole="header" style={styles.sectionTitle}>Selected agent usage</Text>
-           {selectedAgentId ? (() => { const agent = view.dashboard.agents.find((item) => item.id === selectedAgentId); const workspace = view.workspaces.flatMap((item) => item.agents).find((item) => item.id === selectedAgentId); const maxTokens = finalizedTurnScale(workspace?.usageTurns ?? []); return agent && workspace ? <AgentUsageDetail workspaceName={agent.workspaceName} model={workspace.model} turns={workspace.usageTurns} switchedModels={workspace.switchedModels} styles={styles} maxTokens={maxTokens} /> : <Text style={styles.subtitle}>Select an agent.</Text>; })() : <Text style={styles.subtitle}>Select an agent.</Text>}
+           {selectedAgentId ? (() => { const agent = view.dashboard.agents.find((item) => item.id === selectedAgentId); const workspace = view.workspaces.flatMap((item) => item.agents).find((item) => item.id === selectedAgentId); const maxTokens = finalizedTurnScale(workspace?.usageTurns ?? []); return agent && workspace ? <AgentUsageDetail workspaceName={agent.workspaceName} model={workspace.model} finalizedTokens={agent.usage.recordedTokens} costState={agent.usage.costState} turns={workspace.usageTurns} switchedModels={workspace.switchedModels} styles={styles} maxTokens={maxTokens} /> : <Text style={styles.subtitle}>Select an agent.</Text>; })() : <Text style={styles.subtitle}>Select an agent.</Text>}
            {selectedAgentId && timeline[selectedAgentId] ? <ActivityDetail timeline={timeline[selectedAgentId]} onLoadMore={() => loadMore(selectedAgentId)} styles={styles} /> : null}
          </View>
        </View>
@@ -521,6 +521,8 @@ function ModelBar({ bar, maximum, styles }: { bar: ModelUsageBar; maximum: numbe
 function AgentUsageDetail({
   workspaceName,
   model,
+  finalizedTokens,
+  costState,
   turns,
   switchedModels,
   styles,
@@ -528,6 +530,8 @@ function AgentUsageDetail({
 }: {
   workspaceName: string;
   model: string | null;
+  finalizedTokens: number;
+  costState: "complete" | "partial" | "unknown";
   turns: ObservatoryAgentUsageTurn[];
   switchedModels: boolean;
   maxTokens?: number;
@@ -539,6 +543,8 @@ function AgentUsageDetail({
     <View>
       <Text style={styles.detailLine}>Workspace: {workspaceName}</Text>
       {model ? <Text style={styles.detailLine}>Current model: {model}</Text> : null}
+      <Text style={styles.detailLine}>Finalized tokens: {finalizedTokens.toLocaleString()}</Text>
+      <Text style={styles.detailLine}>Cost state: {costState}</Text>
       {switchedModels ? <Text style={styles.detailLine}>⇄ Model switched across turns</Text> : null}
       {finalized.length === 0 && !provisional ? (
         <Text style={styles.detailLine}>No reported turn usage.</Text>
@@ -587,7 +593,7 @@ function TurnColumn({ turn, styles, maxTokens }: { turn: ObservatoryAgentUsageTu
         `${input + output} tokens`
       }
     >
-       <View style={[styles.turnStack, { height: Math.max(24, Math.round((total / scale) * 120)) }]}>
+       <View style={[styles.turnStack, { height: turnBarHeight(turn, scale) }]}>
         <View style={{ flex: (fresh / total) || 0, ...styles.segmentFresh }} />
         <View style={{ flex: (cached / total) || 0, ...styles.segmentCached }} />
         <View style={{ flex: (output / total) || 0, ...styles.segmentOutput }} />

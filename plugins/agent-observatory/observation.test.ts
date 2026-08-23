@@ -8,6 +8,7 @@ import {
   projectDashboard,
   reduceAgentUsage,
   selectedAgentAfterProjection,
+  turnBarHeight,
   type AttentionAgentInput,
   type NormalizedTimelineEntry,
   type ObservatoryAgentUsageTurn,
@@ -17,6 +18,7 @@ describe("projectDashboard", () => {
   it("uses finalized turns for a stable chart scale and clears stale selection", () => {
     const turn = (inputTokens: number, outputTokens: number, provisional = false) => ({ turnId: null, model: "m", inputTokens, cachedInputTokens: 0, outputTokens, costUsd: null, contextUsedTokens: null, contextMaxTokens: null, provisional });
     expect(finalizedTurnScale([turn(4, 6), turn(100, 100, true)])).toBe(10);
+    expect(turnBarHeight(turn(100, 100, true), 10)).toBe(120);
     expect(selectedAgentAfterProjection("gone", [{ id: "still-here" }])).toBeNull();
     expect(selectedAgentAfterProjection("still-here", [{ id: "still-here" }])).toBe("still-here");
   });
