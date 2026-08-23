@@ -1,6 +1,6 @@
 import { type PluginWorkspacePanelProps, usePaseo, useRpc } from "@getpaseo/plugin";
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { Pressable, ScrollView, Text, TextInput, View, type TextStyle, type ViewStyle } from "react-native";
+import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type DimensionValue, type TextStyle, type ViewStyle } from "react-native";
 import { ATTENTION_REASON_LABELS, finalizedTurnScale, selectedAgentAfterProjection, turnBarHeight, type AgentLifecycle, type AttentionEntry, type AttentionReasonKind, type ModelUsageBar, type ObservatoryAgentUsageTurn } from "./observation";
 import type { ObservatoryViewModel } from "./observation";
 import {
@@ -8,7 +8,7 @@ import {
   type ProjectObservationState,
 } from "./project-observation";
 import { observatoryDismissalContracts, type AttentionDismissalRecord } from "./dismissals";
-import { modelUsageAccessibilityLabel } from "./accessibility";
+import { modelUsageAccessibilityLabel, observatoryLayout, turnAccessibilityLabel } from "./accessibility";
 
 export function AgentObservatoryPanel({
   theme,
@@ -16,6 +16,9 @@ export function AgentObservatoryPanel({
   workspaceId,
 }: PluginWorkspacePanelProps) {
   const paseo = usePaseo();
+  const { width } = useWindowDimensions();
+  const responsiveLayout = observatoryLayout(width, layout.compact);
+  const isCompact = responsiveLayout === "compact";
   const getDismissals = useRpc(observatoryDismissalContracts.get);
   const putDismissal = useRpc(observatoryDismissalContracts.put);
   const removeAgentsDismissal = useRpc(observatoryDismissalContracts.removeAgents);
@@ -70,12 +73,12 @@ export function AgentObservatoryPanel({
         backgroundColor: theme.colors.surface0,
       },
       content: {
-        padding: layout.compact ? 16 : 24,
-        gap: layout.compact ? 12 : 18,
+        padding: isCompact ? 16 : 24,
+        gap: isCompact ? 12 : 18,
       },
       title: {
         color: theme.colors.foreground,
-        fontSize: layout.compact ? 22 : 28,
+        fontSize: isCompact ? 22 : 28,
         fontWeight: "700" as const,
       },
       subtitle: {
@@ -85,12 +88,12 @@ export function AgentObservatoryPanel({
       summary: {
         flexDirection: "row" as const,
         flexWrap: "wrap" as const,
-        gap: layout.compact ? 12 : 20,
+        gap: isCompact ? 12 : 20,
       },
       card: {
         flexGrow: 1,
-        flexBasis: layout.compact ? "100%" as unknown as number : "21%" as unknown as number,
-        minWidth: layout.compact ? "100%" as unknown as number : 130,
+        flexBasis: isCompact ? ("100%" as DimensionValue) : responsiveLayout === "medium" ? ("46%" as DimensionValue) : ("21%" as DimensionValue),
+        minWidth: isCompact ? ("100%" as DimensionValue) : 130,
         padding: 14,
         borderWidth: 1,
         borderColor: theme.colors.foregroundMuted,
@@ -99,7 +102,7 @@ export function AgentObservatoryPanel({
       },
       count: {
         color: theme.colors.foreground,
-        fontSize: layout.compact ? 20 : 24,
+        fontSize: isCompact ? 20 : 24,
         fontWeight: "700" as const,
       },
       label: {
@@ -272,12 +275,12 @@ export function AgentObservatoryPanel({
         fontWeight: "600" as const,
       },
       analysisRow: {
-        flexDirection: layout.compact ? "column" as const : "row" as const,
-        gap: layout.compact ? 12 : 18,
+        flexDirection: isCompact ? "column" as const : "row" as const,
+        gap: isCompact ? 12 : 18,
       },
       treePanel: {
-        flex: layout.compact ? undefined : 1,
-        flexBasis: layout.compact ? undefined : "33%" as unknown as number,
+        flex: isCompact ? undefined : 1,
+        flexBasis: isCompact ? undefined : ("33%" as DimensionValue),
         borderWidth: 1,
         borderColor: theme.colors.foregroundMuted,
         borderRadius: 10,
@@ -285,7 +288,7 @@ export function AgentObservatoryPanel({
         gap: 4,
       },
       detailPanel: {
-        flex: layout.compact ? undefined : 2,
+        flex: isCompact ? undefined : 2,
         borderWidth: 1,
         borderColor: theme.colors.foregroundMuted,
         borderRadius: 10,
@@ -312,8 +315,12 @@ export function AgentObservatoryPanel({
         minHeight: 44,
         paddingVertical: 14,
       },
+      touchTarget: {
+        minHeight: 44,
+        justifyContent: "center" as const,
+      },
     }),
-    [layout.compact, theme],
+    [isCompact, responsiveLayout, theme],
   );
 
   return (
@@ -326,7 +333,7 @@ export function AgentObservatoryPanel({
         </Pressable>
         {secondaryOpen ? <>
           <TextInput accessibilityLabel="Search workspaces or agents" placeholder="Search workspaces or agents" value={query} onChangeText={setQuery} style={{ color: theme.colors.foreground, borderWidth: 1, padding: 8 }} />
-          <View style={styles.toolbar}>{(["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(value => <Pressable key={value} accessibilityRole="checkbox" accessibilityState={{ checked: lifecycle === value }} accessibilityLabel={`Filter agents by ${value}`} onPress={() => setLifecycle(lifecycle === value ? undefined : value)}><Text style={styles.label}>{lifecycle === value ? `✓ ${value}` : value}</Text></Pressable>)}</View>
+          <View style={styles.toolbar}>{(["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(value => <Pressable key={value} style={styles.touchTarget} accessibilityRole="checkbox" accessibilityState={{ checked: lifecycle === value }} accessibilityLabel={`Filter agents by ${value}`} onPress={() => setLifecycle(lifecycle === value ? undefined : value)}><Text style={styles.label}>{lifecycle === value ? `✓ ${value}` : value}</Text></Pressable>)}</View>
         </> : null}
       </View>
       <StateContent state={state} styles={styles} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} attentionOpen={attentionOpen} toggleAttention={() => setAttentionOpen(!attentionOpen)} />
@@ -383,6 +390,7 @@ interface PanelStyles {
   secondary: ViewStyle;
   toolbar: ViewStyle;
   control: TextStyle;
+  touchTarget: ViewStyle;
 }
 
 const ATTENTION_REASON_STYLES: Record<AttentionReasonKind, keyof PanelStyles> = {
@@ -403,7 +411,7 @@ function AttentionQueue({ attention, titles, styles, selectAgent, onDismiss, exp
           key={`${entry.agentId}-${entry.episodeId}`}
           onPress={() => selectAgent(entry.agentId)}
           accessibilityLabel={`${ATTENTION_REASON_LABELS[entry.reason]}: ${titles.get(entry.agentId) ?? entry.agentId} in ${entry.workspaceName}`}
-          style={styles.attentionRow}
+           style={[styles.attentionRow, styles.touchTarget]}
         >
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <Text style={styles[ATTENTION_REASON_STYLES[entry.reason]]}>{ATTENTION_REASON_LABELS[entry.reason]}</Text>
@@ -413,7 +421,7 @@ function AttentionQueue({ attention, titles, styles, selectAgent, onDismiss, exp
           <Pressable
             onPress={() => onDismiss(entry)}
             accessibilityLabel={`Dismiss ${ATTENTION_REASON_LABELS[entry.reason]} for ${titles.get(entry.agentId) ?? entry.agentId}`}
-            style={styles.dismissButton}
+             style={[styles.dismissButton, styles.touchTarget]}
           >
             <Text style={styles.dismissLabel}>Dismiss</Text>
           </Pressable>
@@ -475,7 +483,7 @@ function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, ti
          <View accessibilityLabel="Delegation tree" style={styles.treePanel}>
            <Text accessibilityRole="header" style={styles.sectionTitle}>Delegation tree</Text>
            {view.dashboard.agents.length === 0 ? <Text style={styles.subtitle}>No agents</Text> : view.dashboard.agents.map((agent) => (
-             <Pressable key={agent.id} onPress={() => selectAgent(agent.id)} accessibilityRole="button" accessibilityLabel={`${agent.title}, ${agent.model ?? "model unknown"}, ${agent.usage.finalizedTurnCount} finalized turns, ${agent.lifecycle}, depth ${agent.depth}`} style={[styles.row, agent.id === selectedAgentId ? styles.agentPressable : undefined]}>
+              <Pressable key={agent.id} onPress={() => selectAgent(agent.id)} accessibilityRole="button" accessibilityLabel={`${agent.title}, ${agent.model ?? "model unknown"}, ${agent.usage.finalizedTurnCount} finalized turns, ${agent.lifecycle}, depth ${agent.depth}`} style={[styles.row, styles.touchTarget, agent.id === selectedAgentId ? styles.agentPressable : undefined]}>
                <Text style={[styles.agentTitle, { marginLeft: agent.depth * 12 }]}>{agent.title}</Text>
                <Text style={styles.status}>{agent.model ?? "Model unknown"} · {agent.usage.recordedTokens.toLocaleString()} finalized tokens · {agent.lifecycle}</Text>
              </Pressable>
@@ -621,10 +629,7 @@ function TurnColumn({ turn, styles, maxTokens }: { turn: ObservatoryAgentUsageTu
   return (
     <View
       style={styles.turnColumn}
-      accessibilityLabel={
-        `${turn.provisional ? "Live turn" : "Turn"}${turn.model ? `, model ${turn.model}` : ""}: ` +
-        `${input + output} tokens`
-      }
+      accessibilityLabel={turnAccessibilityLabel(turn)}
     >
        <View style={[styles.turnStack, { height: turnBarHeight(turn, scale) }]}>
         <View style={{ flex: (fresh / total) || 0, ...styles.segmentFresh }} />

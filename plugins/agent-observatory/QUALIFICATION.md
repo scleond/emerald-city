@@ -11,7 +11,7 @@ Run from `plugins/agent-observatory`:
 ```sh
 npm install
 npm run typecheck   # tsc --noEmit — must pass with no errors
-npm test            # vitest run — 41 tests across 3 files
+npm test            # vitest run — 48 tests across 4 files
 ```
 
 Captured at qualification (this host):
@@ -21,8 +21,8 @@ Captured at qualification (this host):
 (no output — exit 0)
 
  RUN  v4.1.11
- Test Files  3 passed
-      Tests  41 passed
+ Test Files  4 passed
+      Tests  48 passed
 ```
 
 Coverage includes:
@@ -34,6 +34,7 @@ Coverage includes:
   distinguishes `disconnected` vs `unavailable`, re-establishes subscriptions after recovery,
   clears intervals/subscriptions on `stop()`, and derives live attention hints.
 - `dismissals.test.ts` — store round-trips and TTL pruning.
+- `main.client.test.tsx` — deterministic responsive breakpoints and exact chart/turn labels.
 
 ## 2. No runtime dependency on throwaway prototypes / webview / browser / server
 
@@ -145,7 +146,7 @@ bars (only `finalizedTurns` of agents whose workspace is in the active set are a
 Tests: `observation.test.ts` excludes `archived` and `other-project`; `deriveAttentionQueue`
 test excludes `archived` workspace.
 
-## 8. Layout and theme
+## 8. Responsive layout, accessibility, and theme
 
 - `main.client.tsx` styles memo uses `theme.colors.surface0` for screen, `foreground` for titles,
   `foregroundMuted` for subtitles/status, `accent`/`accentForeground` for workspace badges and
@@ -154,8 +155,10 @@ test excludes `archived` workspace.
 - Every layout-dependent value reads `layout.compact` (`padding`, `gap`, `fontSize`, bar heights);
   count: 22 usages. No hardcoded hex literals remain in production code (previous
   `#e5e7eb`/`#374151` were replaced with theme colors; remaining hex uses are not present).
-- Existing code is described in `observation.ts`/`main.client.tsx` as using `layout.compact`
-  already; this note documents verification.
+- Widths below 600px are compact, 600–959px are medium (2x2 cards and split analysis), and 960px+
+  are wide (four cards and split analysis); `layout.compact` always forces compact.
+- Filter, tree, attention, and dismiss controls have at least 44px touch targets. Chart labels
+  identify finalized/live status and exact fresh/cached/output composition.
 
 Manual verification: checklist steps 9–10.
 
@@ -168,7 +171,7 @@ mock harness `createPaseoHarness` patterns used in `project-observation.test.ts`
 
 | # | Action | Expected |
 |---|--------|----------|
-| 1 | Typecheck & test from `plugins/agent-observatory`: `npm run typecheck && npm test` | Both pass, zero errors, 41 tests green |
+| 1 | Typecheck & test from `plugins/agent-observatory`: `npm run typecheck && npm test` | Both pass, zero errors, 48 tests green across 4 files |
 | 2 | `paseo plugin install <absolute-path>` then `paseo plugin ls` | `agent-observatory  running`; panel **Agent Observatory** appears in Command Center |
 | 3 | Open Observatory from **Workspace A** (Main). Note project name and workspace list | Shows all active workspaces in project (e.g. Main, Feature) grouped with agents; lifecycle counts sum correctly; model usage bars visible if any agent reported usage |
 | 4 | Without closing, open Observatory from **Workspace B** (Feature) in same project | Same project name and same workspace/agent groupings as step 3 (order may differ by name sort) |
@@ -179,7 +182,7 @@ mock harness `createPaseoHarness` patterns used in `project-observation.test.ts`
 | 9 | Reload: edit `main.client.tsx` (e.g. change a title style), run `npm run typecheck && paseo plugin reload agent-observatory` | Panel reflects new code; `paseo plugin ls` still `running`; no duplicate intervals (check `controller.stop` cleared old timer) and no stale workspace members (archived workspaces stay excluded) |
 | 10 | Archive the workspace that opened the panel (keep at least one other active workspace) | Project view remains in `ready`; counts and attention update without that workspace's agents; archiving the last workspace yields `unavailable` message |
 | 11 | While archived, verify counts/attention/usage exclude archived workspace's agents | Lifecycle summary counts decrease; attention queue contains no entries from archived workspace; usage bars total excludes its tokens |
-| 12 | Layout: resize host to wide desktop, then to compact/mobile (or toggle `layout.compact` in a test harness) | Workspace-grouped tree, usage bars (`ModelBar`), attention queue, and agent detail remain usable: no overflow clipping, bar tracks still visible, `padding/gap/fontSize` adapts via `layout.compact` |
+| 12 | Layout: resize host to wide desktop, medium tablet, then compact/mobile (or toggle `layout.compact` in a test harness) | Wide has four cards; medium has a 2x2 card grid and split analysis; compact is one column with horizontally scrolling turn charts |
 | 13 | Theme: switch host theme light ↔ dark | All text uses `theme.colors.foreground`/`foregroundMuted`; surfaces use `surface0`; accent/status colors adapt — no hardcoded dark-on-light or light-on-dark literals remain |
 | 14 | Removal: `paseo plugin uninstall agent-observatory` then `paseo plugin ls` | Plugin no longer listed; panel/command removed |
 
