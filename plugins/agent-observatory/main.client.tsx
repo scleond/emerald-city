@@ -78,6 +78,15 @@ export function AgentObservatoryPanel({
         flexWrap: "wrap" as const,
         gap: layout.compact ? 12 : 20,
       },
+      card: {
+        flex: 1,
+        minWidth: 130,
+        padding: 14,
+        borderWidth: 1,
+        borderColor: theme.colors.foregroundMuted,
+        borderRadius: 10,
+        gap: 4,
+      },
       count: {
         color: theme.colors.foreground,
         fontSize: layout.compact ? 20 : 24,
@@ -182,9 +191,7 @@ export function AgentObservatoryPanel({
       segmentCached: {
         backgroundColor: theme.colors.foregroundMuted,
       },
-      segmentOutput: {
-        backgroundColor: theme.colors.statusDanger,
-      },
+      segmentOutput: { backgroundColor: theme.colors.accentForeground },
       legend: {
         flexDirection: "row" as const,
         flexWrap: "wrap" as const,
@@ -211,7 +218,7 @@ export function AgentObservatoryPanel({
         width: 10,
         height: 10,
         borderRadius: 2,
-        backgroundColor: theme.colors.statusDanger,
+        backgroundColor: theme.colors.accentForeground,
       },
       agentPressable: {
         paddingVertical: layout.compact ? 8 : 10,
@@ -260,10 +267,9 @@ export function AgentObservatoryPanel({
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
-      <Text accessibilityRole="header" style={styles.title}>
-        Agent Observatory
-      </Text>
-      <TextInput placeholder="Search workspaces or agents" value={query} onChangeText={setQuery} style={{ color: theme.colors.foreground, borderWidth: 1, padding: 8 }} />
+      <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "700", letterSpacing: 1.5 }}>TOKEN USAGE</Text>
+      <Text accessibilityRole="header" style={styles.title}>Agent Observatory</Text>
+       <TextInput accessibilityLabel="Search workspaces or agents" placeholder="Search workspaces or agents" value={query} onChangeText={setQuery} style={{ color: theme.colors.foreground, borderWidth: 1, padding: 8 }} />
       <View style={styles.summary}>{(["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(value => <Pressable key={value} onPress={() => setLifecycle(lifecycle === value ? undefined : value)}><Text style={styles.label}>{value}</Text></Pressable>)}</View>
       <StateContent state={state} styles={styles} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} />
     </ScrollView>
@@ -276,6 +282,7 @@ interface PanelStyles {
   title: TextStyle;
   subtitle: TextStyle;
   summary: ViewStyle;
+  card: ViewStyle;
   count: TextStyle;
   label: TextStyle;
   sectionTitle: TextStyle;
@@ -380,7 +387,10 @@ function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, ti
   const titles = new Map(view.workspaces.flatMap((workspace) => workspace.agents.map((agent) => [agent.id, agent.title] as const)));
   return (
     <>
-      <Text style={styles.subtitle}>{view.project.name}</Text>
+       <Text style={styles.subtitle}>Project: {view.project.name}</Text>
+       <Text style={styles.subtitle}>Project-wide token usage across active workspaces.</Text>
+       <Text style={styles.label}>{view.workspaces.length} workspaces · {agentCount} agents</Text>
+       <DashboardSummary dashboard={view.dashboard} styles={styles} />
       <View accessibilityLabel="Agent lifecycle summary" style={styles.summary}>
         {view.counts.map(({ label, count }) => (
           <View key={label} accessibilityLabel={`${label}: ${count}`}>
@@ -390,7 +400,7 @@ function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, ti
         ))}
       </View>
       <AttentionQueue attention={attention} titles={titles} styles={styles} selectAgent={selectAgent} onDismiss={onDismiss} />
-      {view.models.length > 0 ? (<View><Text accessibilityRole="header" style={styles.sectionTitle}>Usage by model</Text>{view.models.map((bar) => (<ModelBar key={bar.model} bar={bar} styles={styles} />))}</View>) : null}
+       <ModelUsagePanel models={view.models} styles={styles} />
       <Text accessibilityRole="header" style={styles.sectionTitle}>
         Workspaces
       </Text>
@@ -467,7 +477,22 @@ function ActivityDetail({ timeline, onLoadMore, styles }: { timeline: TimelineSu
   );
 }
 
-function ModelBar({ bar, styles }: { bar: ModelUsageBar; styles: PanelStyles }) {
+function DashboardSummary({ dashboard, styles }: { dashboard: ObservatoryViewModel["dashboard"]; styles: PanelStyles }) {
+  const cards = [
+    ["Recorded tokens", dashboard.recordedTokens.toLocaleString(), `${dashboard.finalizedTurnCount} finalized turns`],
+    ["Cached input", dashboard.cachedInputTokens.toLocaleString(), `${dashboard.inputTokens ? Math.round((dashboard.cachedInputTokens / dashboard.inputTokens) * 100) : 0}% of input`],
+    ["Reported cost", dashboard.reportedCostUsd === null ? "Unknown" : `$${dashboard.reportedCostUsd.toFixed(4)}`, dashboard.costState === "complete" ? "Complete" : dashboard.costState === "partial" ? "Partial reporting" : "No cost reported"],
+    ["Working agents", dashboard.workingAgentCount.toLocaleString(), "Active or waiting"],
+  ];
+  return <View accessibilityLabel="Usage summary" style={styles.summary}>{cards.map(([label, value, support]) => <View key={label} style={styles.card} accessibilityLabel={`${label}: ${value}. ${support}`}><Text style={styles.count}>{value}</Text><Text style={styles.label}>{label}</Text><Text style={styles.label}>{support}</Text></View>)}</View>;
+}
+
+function ModelUsagePanel({ models, styles }: { models: ModelUsageBar[]; styles: PanelStyles }) {
+  const maximum = Math.max(...models.map((bar) => bar.totalTokens), 1);
+  return <View style={styles.usageSection}><Text accessibilityRole="header" style={styles.sectionTitle}>Usage by model</Text><View style={styles.legend}><View style={styles.legendItem}><View style={styles.legendSwatchFresh} /><Text style={styles.label}>Fresh</Text></View><View style={styles.legendItem}><View style={styles.legendSwatchCached} /><Text style={styles.label}>Cached</Text></View><View style={styles.legendItem}><View style={styles.legendSwatchOutput} /><Text style={styles.label}>Output</Text></View></View>{models.length === 0 ? <Text style={styles.subtitle}>No finalized usage reported yet.</Text> : models.map((bar) => <ModelBar key={bar.model} bar={bar} maximum={maximum} styles={styles} />)}</View>;
+}
+
+function ModelBar({ bar, maximum, styles }: { bar: ModelUsageBar; maximum: number; styles: PanelStyles }) {
   const total = Math.max(bar.totalTokens, 1);
   return (
     <View
@@ -475,10 +500,10 @@ function ModelBar({ bar, styles }: { bar: ModelUsageBar; styles: PanelStyles }) 
       style={styles.barRow}
     >
       <View style={styles.barHeader}>
-        <Text style={styles.modelName}>{bar.model}</Text>
+         <Text style={styles.modelName}>{bar.model} · {bar.provider ?? "Provider unknown"} · {bar.costState === "unknown" ? "Cost unknown" : bar.costState === "partial" ? "Cost partial" : `$${bar.reportedCostUsd?.toFixed(4)}`}</Text>
         <Text style={styles.tokenTotal}>{bar.totalTokens.toLocaleString()} tokens</Text>
       </View>
-      <View style={styles.barTrack}>
+       <View style={[styles.barTrack, { width: `${(bar.totalTokens / maximum) * 100}%` }]}>
         <View style={{ flex: (bar.freshInputTokens / total) || 0, ...styles.segmentFresh }} />
         <View style={{ flex: (bar.cachedInputTokens / total) || 0, ...styles.segmentCached }} />
         <View style={{ flex: (bar.outputTokens / total) || 0, ...styles.segmentOutput }} />
