@@ -88,6 +88,21 @@ describe("ProjectObservationController", () => {
     controller.stop();
   });
 
+  it("records the last successful telemetry time and marks it stale using the injected clock", async () => {
+    let clock = Date.parse("2026-08-22T12:00:00.000Z");
+    const harness = createPaseoHarness();
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers(), () => clock);
+    await controller.start();
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", turnId: "fresh", usage: { inputTokens: 1 } } });
+    expect(controller.getSnapshot()).toMatchObject({ telemetry: { lastSuccessAt: clock, stale: false } });
+    clock += 60_001;
+    controller.setFilters("");
+    expect(controller.getSnapshot()).toMatchObject({ telemetry: { lastSuccessAt: Date.parse("2026-08-22T12:00:00.000Z"), stale: true } });
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", turnId: "recovered", usage: { inputTokens: 2 } } });
+    expect(controller.getSnapshot()).toMatchObject({ telemetry: { lastSuccessAt: clock, stale: false } });
+    controller.stop();
+  });
+
   it("persists live turns and replaces a provisional turn by identity", async () => {
     const stored: NormalizedUsageTurn[] = [];
     const usageStore: UsageTurnStore = {

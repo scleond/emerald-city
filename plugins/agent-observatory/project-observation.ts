@@ -60,7 +60,10 @@ interface TimerApi {
 const refreshIntervalMs = 15_000;
 export interface TimelineState { entries: NormalizedTimelineEntry[]; cursor?: { epoch: string; seq: number }; hasOlder: boolean; loading: boolean; error?: string }
 export type TelemetryHealth = "reported" | "pending" | "not-reported";
-export interface TelemetryDiagnostic { type: string; turnId: string | null; usagePresent: boolean; usageFields: string[]; eventFields: string[]; health: TelemetryHealth }
+export interface TelemetryDiagnostic { type: string; turnId: string | null; usagePresent: boolean; usageFields: string[]; eventFields: string[]; health: TelemetryHealth; lastSuccessAt: number | null; stale: boolean }
+
+const maxTimelineRetries = 3;
+const telemetryStaleAfterMs = 60_000;
 
 export class ProjectObservationController {
   private state: ProjectObservationState = { phase: "loading" };
@@ -86,6 +89,10 @@ export class ProjectObservationController {
   private readonly usageStore?: UsageTurnStore;
   private readonly historicalTurns = new Map<string, readonly NormalizedUsageTurn[]>();
   private telemetry?: TelemetryDiagnostic;
+  private telemetryLastSuccessAt: number | null = null;
+  private readonly timelineRetries = new Map<string, number>();
+  private refreshRetries = 0;
+  private nextRefreshAt = 0;
   private readonly anonymousPersistenceIds = new Map<string, Map<string, string[]>>();
   private readonly anonymousPredecessors = new Map<string, { model: string; identity: string; key: string; at: number; tokens: number }>();
 
@@ -154,6 +161,9 @@ export class ProjectObservationController {
     this.agentModels.clear();
     this.anonymousPersistenceIds.clear();
     this.anonymousPredecessors.clear();
+    this.timelineRetries.clear();
+    this.refreshRetries = 0;
+    this.nextRefreshAt = 0;
     this.directorySubscriptionsActive = false;
     if (this.timer !== null) {
       this.timers.clearInterval(this.timer);
@@ -170,17 +180,25 @@ export class ProjectObservationController {
       this.ingestTimelineUsage(agentId, page.entries ?? []);
       const entries = (page.entries ?? []).map(normalizeTimelineEntry);
       this.timelines.set(agentId, { entries: older ? [...current.entries, ...entries] : entries.slice(0, 50), cursor: page.pageInfo?.cursor, hasOlder: page.pageInfo?.hasOlder ?? false, loading: false });
-    } catch (error) { this.timelines.set(agentId, { ...current, loading: false, error: error instanceof Error ? error.message : String(error) }); }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.timelines.set(agentId, { ...current, loading: false, error: message });
+    }
     this.publishReady();
   }
   async loadTimelineSummary(agentId: string): Promise<void> {
     try {
       const page = await this.paseo.agents.ref(agentId).timeline.refetch({ limit: TIMELINE_SUMMARY_LIMIT, direction: "tail" });
       this.ingestTimelineUsage(agentId, page.entries ?? []);
+      this.timelineRetries.delete(agentId);
       this.timelines.set(agentId, { entries: (page.entries ?? []).map(normalizeTimelineEntry), cursor: page.pageInfo?.cursor, hasOlder: page.pageInfo?.hasOlder ?? false, loading: false });
       this.publishReady();
     } catch (error) {
-      this.timelines.set(agentId, { entries: [], hasOlder: false, loading: false, error: error instanceof Error ? error.message : String(error) });
+      const current = this.timelines.get(agentId) ?? { entries: [], hasOlder: false, loading: false };
+      const message = error instanceof Error ? error.message : String(error);
+      const retries = this.timelineRetries.get(agentId) ?? 0;
+      this.timelineRetries.set(agentId, looksDisconnected(message) ? Math.min(maxTimelineRetries, retries + 1) : maxTimelineRetries);
+      this.timelines.set(agentId, { ...current, loading: false, error: message });
       this.publishReady();
     }
   }
@@ -239,6 +257,8 @@ export class ProjectObservationController {
       ]);
       if (!this.active) return;
       this.directorySubscriptionsActive = true;
+      this.refreshRetries = 0;
+      this.nextRefreshAt = 0;
       this.workspaces.clear();
       for (const workspace of workspaces) {
         if (workspace.archivingAt === null) this.workspaces.set(workspace.id, workspace);
@@ -265,7 +285,10 @@ export class ProjectObservationController {
       } catch {
         // syncDismissals handles its own error state; keep ready phase
       }
-      for (const agent of this.agents.values()) void this.loadTimelineSummary(agent.id);
+      for (const agent of this.agents.values()) {
+        const retries = this.timelineRetries.get(agent.id) ?? 0;
+        if (retries < maxTimelineRetries) void this.loadTimelineSummary(agent.id);
+      }
       await Promise.all([...this.agents.values()].map((agent) => this.restoreUsage(agent.id)));
       if (this.workspaces.size === 0) {
         this.publish({
@@ -279,11 +302,14 @@ export class ProjectObservationController {
       if (!this.active) return;
       this.directorySubscriptionsActive = false;
       const message = error instanceof Error ? error.message : String(error);
-      this.publish(
-        looksDisconnected(message)
-          ? { phase: "disconnected", message: "The selected Paseo host is disconnected." }
-          : { phase: "unavailable", message: `Observatory data is unavailable: ${message}` },
-      );
+      if (looksDisconnected(message)) {
+        this.refreshRetries = Math.min(maxTimelineRetries, this.refreshRetries + 1);
+        this.nextRefreshAt = this.now() + Math.min(8_000, 1_000 * (2 ** (this.refreshRetries - 1)));
+        if (this.project && this.workspaces.size > 0) this.publishReady();
+        else this.publish({ phase: "disconnected", message: "The selected Paseo host is disconnected." });
+      } else {
+        this.publish({ phase: "unavailable", message: `Observatory data is unavailable: ${message}` });
+      }
     } finally {
       this.refreshing = false;
     }
@@ -417,7 +443,14 @@ export class ProjectObservationController {
       usageFields: event.usage ? Object.keys(event.usage).sort() : [],
       eventFields: Object.keys(event).filter((key) => key !== "usage").sort(),
       health: event.type === "turn_completed" && hasUsableUsage(event.usage) ? "reported" : event.type === "usage_updated" && hasUsableUsage(event.usage) ? "pending" : "not-reported",
+      lastSuccessAt: this.telemetryLastSuccessAt,
+      stale: this.telemetryLastSuccessAt === null || this.now() - this.telemetryLastSuccessAt >= telemetryStaleAfterMs,
     };
+    if (hasUsableUsage(event.usage)) {
+      this.telemetryLastSuccessAt = this.now();
+      this.telemetry.lastSuccessAt = this.telemetryLastSuccessAt;
+      this.telemetry.stale = false;
+    }
     const model = this.agentModels.get(payload.agentId) ?? null;
     const usageEvent = normalizeUsageEvent(event);
     if (event.type === "model_changed") {
@@ -504,6 +537,9 @@ export class ProjectObservationController {
 
   private publishReady(): void {
     if (!this.project || this.workspaces.size === 0) return;
+    if (this.telemetry) {
+      this.telemetry.stale = this.telemetryLastSuccessAt === null || this.now() - this.telemetryLastSuccessAt >= telemetryStaleAfterMs;
+    }
     const dismissedSet = new Set(this.dismissals.map((r) => r.episodeId));
     this.publish({
       phase: "ready",
