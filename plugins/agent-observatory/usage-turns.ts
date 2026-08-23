@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { defineRpc } from "@getpaseo/plugin";
 
 const nullableNumber = z.number().finite().nonnegative().nullable();
 
@@ -27,6 +28,19 @@ export const UsageTurnStoreFileSchema = z.object({
   turns: z.array(NormalizedUsageTurnSchema),
 });
 export type UsageTurnStoreFile = z.infer<typeof UsageTurnStoreFileSchema>;
+
+export const observatoryUsageContracts = {
+  get: defineRpc({
+    name: "agent-observatory.usage.get",
+    input: z.object({ projectId: z.string().min(1), workspaceId: z.string().min(1), agentId: z.string().min(1) }),
+    output: z.object({ turns: z.array(NormalizedUsageTurnSchema) }),
+  }),
+  put: defineRpc({
+    name: "agent-observatory.usage.put",
+    input: z.object({ turn: NormalizedUsageTurnSchema }),
+    output: z.object({ turns: z.array(NormalizedUsageTurnSchema) }),
+  }),
+};
 
 export interface UsageTurnFileStorage { read(): Promise<string | null>; write(data: string): Promise<void> }
 export interface UsageTurnStore {

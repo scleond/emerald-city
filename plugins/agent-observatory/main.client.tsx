@@ -9,6 +9,7 @@ import {
   type TelemetryDiagnostic,
 } from "./project-observation";
 import { observatoryDismissalContracts, type AttentionDismissalRecord } from "./dismissals";
+import { observatoryUsageContracts, type HistoricalUsageProjection, type UsageRange, type UsageTurnStore } from "./usage-turns";
 import { lifecycleStyle, modelUsageAccessibilityLabel, observatoryLayout, selectedAgentMetadata, turnAccessibilityLabel, turnDisplayLabel, usageChartPalette } from "./accessibility";
 
 export function AgentObservatoryPanel({
@@ -23,6 +24,8 @@ export function AgentObservatoryPanel({
   const getDismissals = useRpc(observatoryDismissalContracts.get);
   const putDismissal = useRpc(observatoryDismissalContracts.put);
   const removeAgentsDismissal = useRpc(observatoryDismissalContracts.removeAgents);
+  const getUsage = useRpc(observatoryUsageContracts.get);
+  const putUsage = useRpc(observatoryUsageContracts.put);
   const dismissalApi = useMemo(
     () => ({
       get: async (projectId: string) => {
@@ -41,8 +44,14 @@ export function AgentObservatoryPanel({
     [getDismissals, putDismissal, removeAgentsDismissal],
   );
   const controller = useMemo(
-    () => new ProjectObservationController(paseo, workspaceId, undefined, undefined, dismissalApi),
-    [paseo, workspaceId, dismissalApi],
+    () => {
+      const usageStore: UsageTurnStore = {
+        get: async (scope) => (await getUsage(scope)).turns,
+        put: async (turn) => (await putUsage({ turn })).turns,
+      };
+      return new ProjectObservationController(paseo, workspaceId, undefined, undefined, dismissalApi, usageStore);
+    },
+    [paseo, workspaceId, dismissalApi, getUsage, putUsage],
   );
   const state = useSyncExternalStore(
     controller.subscribe,
@@ -518,10 +527,10 @@ function StateContent({ state, styles, lifecycle, setLifecycle, selectedAgentId,
       </View>
     );
   }
-  return <ReadyContent view={state.view} styles={styles} telemetry={state.telemetry} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} onDismiss={onDismiss} attentionOpen={attentionOpen} toggleAttention={toggleAttention} />;
+  return <ReadyContent view={state.view} historicalUsage={state.historicalUsage} styles={styles} telemetry={state.telemetry} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} onDismiss={onDismiss} attentionOpen={attentionOpen} toggleAttention={toggleAttention} />;
 }
 
-function ReadyContent({ view, styles, telemetry, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, timeline, attention, onDismiss, attentionOpen, toggleAttention }: { view: ObservatoryViewModel; styles: PanelStyles; telemetry?: TelemetryDiagnostic; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[]; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
+function ReadyContent({ view, historicalUsage, styles, telemetry, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, timeline, attention, onDismiss, attentionOpen, toggleAttention }: { view: ObservatoryViewModel; historicalUsage?: Record<UsageRange, HistoricalUsageProjection>; styles: PanelStyles; telemetry?: TelemetryDiagnostic; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[]; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
   const agentCount = view.workspaces.reduce((total, workspace) => total + workspace.agents.length, 0);
   const titles = new Map(view.workspaces.flatMap((workspace) => workspace.agents.map((agent) => [agent.id, agent.title] as const)));
   return (
@@ -529,7 +538,7 @@ function ReadyContent({ view, styles, telemetry, lifecycle, setLifecycle, select
        <Text style={styles.subtitle}>Project: {view.project.name}</Text>
        <Text style={styles.subtitle}>Project-wide token usage across active workspaces.</Text>
        <Text style={styles.label}>{view.workspaces.length} workspaces · {agentCount} agents</Text>
-       <DashboardSummary dashboard={view.dashboard} styles={styles} />
+       <DashboardSummary dashboard={view.dashboard} historicalUsage={historicalUsage} styles={styles} />
       <View accessibilityLabel="Agent lifecycle summary" style={styles.summary}>
         {view.counts.map(({ label, count }) => (
           <View key={label} accessibilityLabel={`${label}: ${count}`}>
@@ -593,13 +602,15 @@ function ActivityDetail({ timeline, onLoadMore, styles }: { timeline: TimelineSu
   );
 }
 
-function DashboardSummary({ dashboard, styles }: { dashboard: ObservatoryViewModel["dashboard"]; styles: PanelStyles }) {
+function DashboardSummary({ dashboard, historicalUsage, styles }: { dashboard: ObservatoryViewModel["dashboard"]; historicalUsage?: Record<UsageRange, HistoricalUsageProjection>; styles: PanelStyles }) {
   const cards = [
     ["Recorded tokens", dashboard.recordedTokens.toLocaleString(), `${dashboard.finalizedTurnCount} finalized turns`],
     ["Cached input", dashboard.cachedInputTokens.toLocaleString(), `${dashboard.inputTokens ? Math.round((dashboard.cachedInputTokens / dashboard.inputTokens) * 100) : 0}% of input`],
     ["Reported cost", dashboard.reportedCostUsd === null ? "Unknown" : `$${dashboard.reportedCostUsd.toFixed(4)}`, dashboard.costState === "complete" ? "Complete" : dashboard.costState === "partial" ? "Partial reporting" : "No cost reported"],
     ["Working agents", dashboard.workingAgentCount.toLocaleString(), "Active or waiting"],
   ];
+  const history = historicalUsage?.["30d"];
+  if (history) cards.push(["30d recorded", history.recordedTokens.toLocaleString(), `${history.turns.length} persisted turns`]);
   return <View accessibilityLabel="Usage summary" style={styles.summary}>{cards.map(([label, value, support]) => <View key={label} style={styles.card} accessibilityLabel={`${label}: ${value}. ${support}`}><Text style={styles.count}>{value}</Text><Text style={styles.label}>{label}</Text><Text style={styles.label}>{support}</Text></View>)}</View>;
 }
 

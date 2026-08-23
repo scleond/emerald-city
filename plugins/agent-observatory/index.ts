@@ -1,8 +1,12 @@
-import type { PluginContext } from "@getpaseo/plugin";
+import type { PluginContext, PluginHandlerContext } from "@getpaseo/plugin";
 import { AgentObservatoryPanel } from "./main.client";
 import { observatoryDismissalContracts, type DismissalStore } from "./dismissals";
+import { observatoryUsageContracts } from "./usage-turns";
 
 let storePromise: Promise<DismissalStore> | null = null;
+let usageStorePromise: ReturnType<typeof importUsageStore> | null = null;
+function importUsageStore() { return import("./usage-turn-store-node").then((m) => m.createFileUsageTurnStore()); }
+function getUsageStore() { if (!usageStorePromise) usageStorePromise = importUsageStore(); return usageStorePromise; }
 function getStore(): Promise<DismissalStore> {
   if (!storePromise) storePromise = import("./dismissal-store-node").then((m) => m.createFileDismissalStore());
   return storePromise;
@@ -47,12 +51,14 @@ export default function contribute(plugin: PluginContext) {
     }
   });
 
-  plugin.handle(observatoryDismissalContracts.removeAgents, async (input, ctx) => {
+  plugin.handle(observatoryUsageContracts.get, async (input) => ({ turns: [...await (await getUsageStore()).get(input)] }));
+  plugin.handle(observatoryUsageContracts.put, async (input) => ({ turns: [...await (await getUsageStore()).put(input.turn)] }));
+
+  plugin.handle(observatoryDismissalContracts.removeAgents, async (input, ctx: PluginHandlerContext) => {
     try {
       const store = await getStore();
       // Verify existence via paseo API if available; only remove dismissals for missing agents.
-      const maybeCtx = ctx as unknown as { paseo?: any };
-      const paseo = maybeCtx?.paseo as { agents?: { list?: (args?: unknown) => Promise<{ entries: { agent: { id: string } }[]; pageInfo?: { hasMore?: boolean; nextCursor?: string } }> } | undefined } | undefined;
+      const paseo = ctx.paseo;
       if (paseo?.agents?.list) {
         try {
           const existingIds = new Set<string>();
@@ -60,7 +66,7 @@ export default function contribute(plugin: PluginContext) {
           do {
             const page = await paseo.agents.list({
               page: { limit: 200, ...(cursor ? { cursor } : {}) },
-            } as unknown as never);
+            });
             for (const entry of page.entries) existingIds.add(entry.agent.id);
             cursor = page.pageInfo?.hasMore ? page.pageInfo.nextCursor ?? undefined : undefined;
           } while (cursor);
@@ -88,5 +94,6 @@ export default function contribute(plugin: PluginContext) {
   // carrying stale file handles or cached state.
   return () => {
     storePromise = null;
+    usageStorePromise = null;
   };
 }

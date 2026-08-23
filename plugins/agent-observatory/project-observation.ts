@@ -15,7 +15,7 @@ import {
 } from "./observation";
 import { normalizeTimelineEntry, TIMELINE_DETAIL_LIMIT, TIMELINE_SUMMARY_LIMIT, type AgentLifecycle, type NormalizedTimelineEntry, type RawTimelineEntry } from "./observation";
 import type { AttentionDismissalRecord } from "./dismissals";
-import type { NormalizedUsageTurn, UsageTurnStore } from "./usage-turns";
+import { projectHistoricalUsage, type HistoricalUsageProjection, type NormalizedUsageTurn, type UsageRange, type UsageTurnStore } from "./usage-turns";
 
 export interface ObservatoryDismissalApi {
   get(projectId: string): Promise<readonly AttentionDismissalRecord[]>;
@@ -43,7 +43,7 @@ export type ObservatoryPaseoApi = Omit<Pick<PaseoApi, "workspaces" | "agents">, 
 
 export type ProjectObservationState =
   | { phase: "loading" }
-  | { phase: "ready"; view: ObservatoryViewModel; attention: AttentionEntry[]; timeline?: Record<string, TimelineState>; dismissalError?: string; telemetry?: TelemetryDiagnostic }
+  | { phase: "ready"; view: ObservatoryViewModel; attention: AttentionEntry[]; timeline?: Record<string, TimelineState>; historicalUsage?: Record<UsageRange, HistoricalUsageProjection>; dismissalError?: string; telemetry?: TelemetryDiagnostic }
   | { phase: "disconnected"; message: string }
   | { phase: "unavailable"; message: string };
 
@@ -78,6 +78,7 @@ export class ProjectObservationController {
   private dismissalError?: string;
   private readonly dismissalApi?: ObservatoryDismissalApi;
   private readonly usageStore?: UsageTurnStore;
+  private readonly historicalTurns = new Map<string, readonly NormalizedUsageTurn[]>();
   private telemetry?: TelemetryDiagnostic;
 
   constructor(
@@ -141,6 +142,7 @@ export class ProjectObservationController {
     for (const unsubscribe of this.streams.values()) unsubscribe();
     this.streams.clear();
     this.usage.clear();
+    this.historicalTurns.clear();
     this.agentModels.clear();
     this.directorySubscriptionsActive = false;
     if (this.timer !== null) {
@@ -324,6 +326,7 @@ export class ProjectObservationController {
     if (!agent) return;
     try {
       const turns = await this.usageStore.get({ projectId: this.project.id, workspaceId: agent.workspaceId, agentId });
+      this.historicalTurns.set(agentId, turns);
       let record = emptyAgentUsage();
       for (const turn of turns) {
         record = reduceAgentUsage(record, { kind: turn.confidence === "low" ? "provisional" : "final", turnId: turn.turnId, model: turn.model, usage: { inputTokens: turn.inputTokens ?? undefined, cachedInputTokens: turn.cachedInputTokens ?? undefined, outputTokens: turn.outputTokens ?? undefined, totalCostUsd: turn.costUsd ?? undefined, contextWindowUsedTokens: turn.contextUsedTokens ?? undefined, contextWindowMaxTokens: turn.contextMaxTokens ?? undefined } }, this.agentModels.get(agentId) ?? null);
@@ -480,6 +483,7 @@ export class ProjectObservationController {
       timeline: Object.fromEntries(this.timelines),
       ...(this.dismissalError ? { dismissalError: this.dismissalError } : {}),
       ...(this.telemetry ? { telemetry: this.telemetry } : {}),
+      historicalUsage: Object.fromEntries((["24h", "7d", "30d"] as UsageRange[]).map((range) => [range, projectHistoricalUsage([...this.historicalTurns.values()].flat(), range, this.now())])) as Record<UsageRange, HistoricalUsageProjection>,
     });
   }
 
