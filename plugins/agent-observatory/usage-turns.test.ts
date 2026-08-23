@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createUsageTurnStore, projectHistoricalUsage, type UsageTurnFileStorage, type NormalizedUsageTurn } from "./usage-turns";
 import { historySourceLabel, prepareSanitizedUsageExport, projectHistoryForRange, sanitizedUsageExport } from "./usage-history";
 import { normalizeUsageEvent } from "./observation";
-import { emptyAgentUsage, reduceAgentUsage } from "./observation";
+import { emptyAgentUsage, fallbackUsageIdentity, reduceAgentUsage } from "./observation";
 
 function storage(initial: string | null = null): UsageTurnFileStorage & { value: string | null } {
   return { value: initial, async read() { return this.value; }, async write(data) { this.value = data; } };
@@ -28,6 +28,15 @@ describe("usage turn store", () => {
   it("normalizes live and historical usage shapes to one turn event", () => {
     expect(normalizeUsageEvent({ type: "usage_updated", turnId: "t", usage: { inputTokens: 1 }, timestamp: "2026-01-01T00:00:00.000Z" })).toMatchObject({ kind: "provisional", turnId: "t" });
     expect(normalizeUsageEvent({ kind: "turn_completed", turnId: "t", usage: { outputTokens: 2 }, observedAt: "2026-01-01T00:00:01.000Z" })).toMatchObject({ kind: "final", turnId: "t", observedAt: "2026-01-01T00:00:01.000Z" });
+  });
+
+  it("rejects null and empty usage at normalization", () => {
+    expect(normalizeUsageEvent({ type: "turn_completed", usage: null })).toBeNull();
+    expect(normalizeUsageEvent({ type: "usage_updated", usage: {} })).toBeNull();
+  });
+
+  it("exposes one stable anonymous persistence identity", () => {
+    expect(fallbackUsageIdentity("model")).toBe(fallbackUsageIdentity("model"));
   });
   it("exports only normalized usage fields", () => {
     const turn = { projectId: "p", workspaceId: "w", agentId: "a", turnId: "t", observedAt: "2026-01-01T00:00:00.000Z", startedAt: null, completedAt: null, model: "model", inputTokens: 1, cachedInputTokens: 0, outputTokens: 2, contextUsedTokens: null, contextMaxTokens: null, costUsd: null, costState: "unknown", confidence: "high" } satisfies NormalizedUsageTurn;

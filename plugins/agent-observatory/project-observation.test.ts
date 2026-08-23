@@ -77,6 +77,17 @@ describe("ProjectObservationController", () => {
     controller.stop();
   });
 
+  it("marks null and empty usage as not reported", async () => {
+    const harness = createPaseoHarness();
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers());
+    await controller.start();
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "usage_updated", usage: null } });
+    expect(controller.getSnapshot()).toMatchObject({ telemetry: { health: "not-reported" } });
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", usage: {} } });
+    expect(controller.getSnapshot()).toMatchObject({ telemetry: { health: "not-reported" } });
+    controller.stop();
+  });
+
   it("persists live turns and replaces a provisional turn by identity", async () => {
     const stored: NormalizedUsageTurn[] = [];
     const usageStore: UsageTurnStore = {
@@ -94,6 +105,19 @@ describe("ProjectObservationController", () => {
     harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", turnId: "turn-1", usage: { inputTokens: 12, outputTokens: 3 } } });
     await vi.waitFor(() => expect(stored).toHaveLength(1));
     expect(stored[0]).toMatchObject({ turnId: "turn-1", confidence: "high", inputTokens: 12, outputTokens: 3 });
+    controller.stop();
+  });
+
+  it("uses one persistence identity for anonymous provisional and final events", async () => {
+    const stored: NormalizedUsageTurn[] = [];
+    const usageStore: UsageTurnStore = { async get() { return stored; }, async put(turn) { const index = stored.findIndex((item) => item.turnId === turn.turnId); if (index >= 0) stored[index] = turn; else stored.push(turn); return stored; } };
+    const harness = createPaseoHarness();
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers(), undefined, undefined, usageStore);
+    await controller.start();
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "usage_updated", model: "model", usage: { inputTokens: 10 } } });
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", model: "model", usage: { inputTokens: 10, outputTokens: 2 } } });
+    await vi.waitFor(() => expect(stored).toHaveLength(1));
+    expect(stored[0]).toMatchObject({ turnId: "fallback:model", confidence: "high" });
     controller.stop();
   });
 

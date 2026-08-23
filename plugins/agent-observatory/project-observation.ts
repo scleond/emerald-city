@@ -6,6 +6,8 @@ import {
   emptyAgentUsage,
   reduceAgentUsage,
   normalizeUsageEvent,
+  hasUsableUsage,
+  fallbackUsageIdentity,
   type AgentUsageEvent,
   type AgentUsageRecord,
   type ObservatoryAgentSnapshot,
@@ -409,7 +411,7 @@ export class ProjectObservationController {
       usagePresent: event.usage !== undefined,
       usageFields: event.usage ? Object.keys(event.usage).sort() : [],
       eventFields: Object.keys(event).filter((key) => key !== "usage").sort(),
-      health: event.type === "turn_completed" && event.usage !== undefined ? "reported" : event.type === "usage_updated" && event.usage !== undefined ? "pending" : "not-reported",
+      health: event.type === "turn_completed" && hasUsableUsage(event.usage) ? "reported" : event.type === "usage_updated" && hasUsableUsage(event.usage) ? "pending" : "not-reported",
     };
     const model = this.agentModels.get(payload.agentId) ?? null;
     const usageEvent = normalizeUsageEvent(event);
@@ -418,7 +420,10 @@ export class ProjectObservationController {
       if (nextModel !== null) this.agentModels.set(payload.agentId, nextModel);
       return;
     }
-    if (!usageEvent) return;
+    if (!usageEvent) {
+      this.publishReady();
+      return;
+    }
     this.usage.set(
       payload.agentId,
       reduceAgentUsage(this.usage.get(payload.agentId) ?? emptyAgentUsage(), usageEvent, model),
@@ -447,7 +452,7 @@ export class ProjectObservationController {
     const usage = event.usage;
     const turn: NormalizedUsageTurn = {
       projectId: this.project.id, workspaceId: agent.workspaceId, agentId,
-      turnId: event.turnId ?? `fallback:${observedAt}:${event.model ?? fallbackModel ?? "unknown"}`,
+      turnId: event.turnId ?? fallbackUsageIdentity(event.model ?? fallbackModel),
       observedAt, startedAt: null, completedAt: event.kind === "final" ? observedAt : null,
       model: event.model ?? fallbackModel, inputTokens: usage.inputTokens ?? null, cachedInputTokens: usage.cachedInputTokens ?? null,
       outputTokens: usage.outputTokens ?? null, contextUsedTokens: usage.contextWindowUsedTokens ?? null, contextMaxTokens: usage.contextWindowMaxTokens ?? null,

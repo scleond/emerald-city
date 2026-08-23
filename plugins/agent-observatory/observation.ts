@@ -36,10 +36,15 @@ export interface AgentUsageRecord {
   provisionalTurn: ObservatoryAgentUsageTurn | null;
 }
 
+export function hasUsableUsage(usage: ObservatoryUsageFields | null | undefined): usage is ObservatoryUsageFields {
+  return usage !== null && usage !== undefined && Object.values(usage).some((value) => typeof value === "number" && Number.isFinite(value));
+}
+
 export function normalizeUsageEvent(input: { type?: string; kind?: string; turnId?: unknown; model?: unknown; usage?: ObservatoryUsageFields | null; timestamp?: string; observedAt?: string }): AgentUsageEvent | null {
   const type = input.type ?? input.kind;
   if (type !== "usage_updated" && type !== "turn_completed") return null;
-  return { kind: type === "turn_completed" ? "final" : "provisional", turnId: typeof input.turnId === "string" ? input.turnId : undefined, model: typeof input.model === "string" ? input.model : undefined, usage: input.usage ?? undefined, observedAt: input.timestamp ?? input.observedAt };
+  if (!hasUsableUsage(input.usage)) return null;
+  return { kind: type === "turn_completed" ? "final" : "provisional", turnId: typeof input.turnId === "string" ? input.turnId : undefined, model: typeof input.model === "string" ? input.model : undefined, usage: input.usage, observedAt: input.timestamp ?? input.observedAt };
 }
 
 export function emptyAgentUsage(): AgentUsageRecord {
@@ -67,8 +72,12 @@ function toUsageTurn(
   };
 }
 
+export function fallbackUsageIdentity(model: string | null | undefined): string {
+  return `fallback:${model ?? "unknown"}`;
+}
+
 function fallbackTurnIdentity(turn: ObservatoryAgentUsageTurn): string {
-  return `fallback:${turn.model ?? ""}:${turn.inputTokens ?? ""}:${turn.cachedInputTokens ?? ""}:${turn.outputTokens ?? ""}:${turn.costUsd ?? ""}:${turn.contextUsedTokens ?? ""}:${turn.contextMaxTokens ?? ""}`;
+  return fallbackUsageIdentity(turn.model);
 }
 
 function turnIdentity(turn: ObservatoryAgentUsageTurn): string {
