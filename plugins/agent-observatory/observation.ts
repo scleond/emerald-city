@@ -240,13 +240,16 @@ export function createProjectObservation(project: ObservatoryProject, workspaceS
     agent.switchedModels =
       new Set(agent.usageTurns.filter((turn) => !turn.provisional).map((turn) => turn.model ?? agent.model)).size > 1;
   }
-  const workspaces = active.map(w => ({ id: w.id, name: w.name, agents: treeOrder(kept.filter((agent) => agent.workspaceId === w.id)) }));
-  const agents = workspaces.flatMap((workspace) => workspace.agents);
+  // Build one tree across the project; workspace buckets retain workspace identity for rendering.
+  const ordered = treeOrder(kept);
+  const workspaces = active.map(w => ({ id: w.id, name: w.name, agents: ordered.filter((agent) => agent.workspaceId === w.id) }));
+  const agents = ordered;
   return { project, counts, models: aggregateModelUsage(agents.map((agent) => ({ model: agent.model, usage: { finalizedTurns: agent.usageTurns, provisionalTurn: null } }))), dashboard: projectDashboard(agents, workspaces), workspaces };
 }
 function treeOrder(agents: ObservatoryAgentView[]): ObservatoryAgentView[] {
   const children = new Map<string, ObservatoryAgentView[]>(); const roots: ObservatoryAgentView[] = [];
-  for (const a of agents) { const p = a.parentId && agents.some(x => x.id === a.parentId && x.workspaceId === a.workspaceId) ? a.parentId : null; if (p) (children.get(p) ?? (children.set(p, []), children.get(p)!)).push(a); else roots.push(a); }
+  const ids = new Set(agents.map((agent) => agent.id));
+  for (const a of agents) { const p = a.parentId && ids.has(a.parentId) ? a.parentId : null; if (p) (children.get(p) ?? (children.set(p, []), children.get(p)!)).push(a); else roots.push(a); }
   const out: ObservatoryAgentView[] = []; const visit = (a: ObservatoryAgentView, depth: number) => { a.depth = depth; out.push(a); for (const child of (children.get(a.id) ?? []).sort(compareAgents)) visit(child, depth + 1); };
   for (const root of roots.sort(compareAgents)) visit(root, 0); return out;
 }

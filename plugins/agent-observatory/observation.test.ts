@@ -101,6 +101,24 @@ describe("createProjectObservation", () => {
     ]);
   });
 
+  it("nests children across workspaces and keeps filtered parents as roots", () => {
+    const view = createProjectObservation({ id: "project-1", name: "Project" }, [workspace("workspace-1", "Main"), workspace("workspace-2", "Feature")], [
+      agent("parent", "running", { workspaceId: "workspace-1" }),
+      agent("child", "running", { workspaceId: "workspace-2", labels: { "paseo.parent-agent-id": "parent" } }),
+    ]);
+    expect(view.dashboard.agents.map((item) => [item.id, item.workspaceName, item.depth, item.parentId])).toEqual([
+      ["parent", "Main", 0, null], ["child", "Feature", 1, "parent"],
+    ]);
+
+    const filtered = createProjectObservation(
+      { id: "project-1", name: "Project" },
+      [workspace("workspace-1", "Main"), workspace("workspace-2", "Feature")],
+      [agent("parent", "running", { workspaceId: "workspace-1" }), agent("child", "running", { workspaceId: "workspace-2", labels: { "paseo.parent-agent-id": "parent" } })],
+      { query: "child" },
+    );
+    expect(filtered.dashboard.agents[0]).toMatchObject({ id: "child", parentId: "parent", parentTitle: "parent", depth: 0 });
+  });
+
   it("normalizes supported and unknown timeline activity", () => {
     expect(normalizeTimelineEntry({ item: { type: "user_message", text: "hello" } }).category).toBe("message");
     expect(normalizeTimelineEntry({ item: { type: "tool_call", status: "ok" } }).category).toBe("tool_activity");
