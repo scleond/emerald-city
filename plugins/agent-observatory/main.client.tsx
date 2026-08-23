@@ -6,6 +6,7 @@ import type { ObservatoryViewModel } from "./observation";
 import {
   ProjectObservationController,
   type ProjectObservationState,
+  type TelemetryDiagnostic,
 } from "./project-observation";
 import { observatoryDismissalContracts, type AttentionDismissalRecord } from "./dismissals";
 import { modelUsageAccessibilityLabel, observatoryLayout, turnAccessibilityLabel } from "./accessibility";
@@ -78,8 +79,33 @@ export function AgentObservatoryPanel({
       },
       title: {
         color: theme.colors.foreground,
-        fontSize: isCompact ? 22 : 28,
+        fontSize: isCompact ? 24 : 32,
         fontWeight: "700" as const,
+      },
+      headerRow: {
+        flexDirection: "row" as const,
+        alignItems: "center" as const,
+        justifyContent: "space-between" as const,
+        gap: 12,
+      },
+      searchInput: {
+        color: theme.colors.foreground,
+        borderWidth: 1,
+        borderColor: theme.colors.foregroundMuted,
+        borderRadius: 6,
+        height: 24,
+        paddingHorizontal: 8,
+        paddingVertical: 0,
+        width: isCompact ? 150 : 220,
+      },
+      filterLine: {
+        flexDirection: "row" as const,
+        flexWrap: "wrap" as const,
+        alignItems: "center" as const,
+        gap: 10,
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.colors.foregroundMuted,
       },
       subtitle: {
         color: theme.colors.foregroundMuted,
@@ -117,6 +143,9 @@ export function AgentObservatoryPanel({
       row: {
         gap: 3,
         paddingVertical: layout.compact ? 8 : 10,
+        paddingHorizontal: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.colors.foregroundMuted,
       },
       workspace: {
         gap: layout.compact ? 4 : 6,
@@ -135,6 +164,15 @@ export function AgentObservatoryPanel({
         color: theme.colors.foregroundMuted,
         fontSize: 13,
       },
+      agentModel: {
+        color: theme.colors.foregroundMuted,
+        fontFamily: "monospace",
+        fontSize: 12,
+      },
+      lifecycleActive: { color: theme.colors.accent, fontWeight: "600" as const },
+      lifecycleWaiting: { color: theme.colors.accentForeground, fontWeight: "600" as const },
+      lifecycleFailed: { color: theme.colors.statusDanger, fontWeight: "600" as const },
+      lifecycleFinished: { color: theme.colors.foregroundMuted, fontWeight: "600" as const },
       attentionRow: {
         gap: 2,
         paddingVertical: layout.compact ? 8 : 10,
@@ -202,7 +240,7 @@ export function AgentObservatoryPanel({
         backgroundColor: theme.colors.accent,
       },
       segmentCached: {
-        backgroundColor: theme.colors.foregroundMuted,
+        backgroundColor: theme.colors.statusDanger,
       },
       segmentOutput: { backgroundColor: theme.colors.accentForeground },
       legend: {
@@ -225,7 +263,7 @@ export function AgentObservatoryPanel({
         width: 10,
         height: 10,
         borderRadius: 2,
-        backgroundColor: theme.colors.foregroundMuted,
+        backgroundColor: theme.colors.statusDanger,
       },
       legendSwatchOutput: {
         width: 10,
@@ -326,17 +364,11 @@ export function AgentObservatoryPanel({
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={{ color: theme.colors.accent, fontSize: 11, fontWeight: "700", letterSpacing: 1.5 }}>TOKEN USAGE</Text>
-      <Text accessibilityRole="header" style={styles.title}>Agent Observatory</Text>
-      <View accessibilityLabel="Secondary dashboard controls" style={styles.secondary}>
-        <Pressable accessibilityRole="button" onPress={() => setSecondaryOpen(!secondaryOpen)}>
-          <Text style={styles.control}>{secondaryOpen ? "Hide filters" : "Search and filter agents"}</Text>
-        </Pressable>
-        {secondaryOpen ? <>
-          <TextInput accessibilityLabel="Search workspaces or agents" placeholder="Search workspaces or agents" value={query} onChangeText={setQuery} style={{ color: theme.colors.foreground, borderWidth: 1, padding: 8 }} />
-          <View style={styles.toolbar}>{(["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(value => <Pressable key={value} style={styles.touchTarget} accessibilityRole="checkbox" accessibilityState={{ checked: lifecycle === value }} accessibilityLabel={`Filter agents by ${value}`} onPress={() => setLifecycle(lifecycle === value ? undefined : value)}><Text style={styles.label}>{lifecycle === value ? `✓ ${value}` : value}</Text></Pressable>)}</View>
-        </> : null}
+      <View style={styles.headerRow}>
+        <Text accessibilityRole="header" style={styles.title}>Agent Observatory</Text>
+        <TextInput accessibilityLabel="Search workspaces or agents" placeholder="Search" value={query} onChangeText={setQuery} style={styles.searchInput} />
       </View>
-      <StateContent state={state} styles={styles} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} attentionOpen={attentionOpen} toggleAttention={() => setAttentionOpen(!attentionOpen)} />
+      <StateContent state={state} styles={styles} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} attentionOpen={attentionOpen} toggleAttention={() => setAttentionOpen(!attentionOpen)} />
     </ScrollView>
   );
 }
@@ -356,6 +388,11 @@ interface PanelStyles {
   workspaceTitle: TextStyle;
   agentTitle: TextStyle;
   status: TextStyle;
+  agentModel: TextStyle;
+  lifecycleActive: TextStyle;
+  lifecycleWaiting: TextStyle;
+  lifecycleFailed: TextStyle;
+  lifecycleFinished: TextStyle;
   attentionRow: ViewStyle;
   reasonUserInput: TextStyle;
   reasonFailure: TextStyle;
@@ -389,6 +426,9 @@ interface PanelStyles {
   detailPanel: ViewStyle;
   secondary: ViewStyle;
   toolbar: ViewStyle;
+  headerRow: ViewStyle;
+  searchInput: TextStyle;
+  filterLine: ViewStyle;
   control: TextStyle;
   touchTarget: ViewStyle;
 }
@@ -431,7 +471,7 @@ function AttentionQueue({ attention, titles, styles, selectAgent, onDismiss, exp
   );
 }
 
-function StateContent({ state, styles, selectedAgentId, selectAgent, loadMore, onDismiss, attentionOpen, toggleAttention }: { state: ProjectObservationState; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
+function StateContent({ state, styles, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, onDismiss, attentionOpen, toggleAttention }: { state: ProjectObservationState; styles: PanelStyles; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
   if (state.phase === "loading") {
     return <Text style={styles.subtitle}>Loading project agents…</Text>;
   }
@@ -451,10 +491,10 @@ function StateContent({ state, styles, selectedAgentId, selectAgent, loadMore, o
       </View>
     );
   }
-  return <ReadyContent view={state.view} styles={styles} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} onDismiss={onDismiss} attentionOpen={attentionOpen} toggleAttention={toggleAttention} />;
+  return <ReadyContent view={state.view} styles={styles} telemetry={state.telemetry} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} onDismiss={onDismiss} attentionOpen={attentionOpen} toggleAttention={toggleAttention} />;
 }
 
-function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, timeline, attention, onDismiss, attentionOpen, toggleAttention }: { view: ObservatoryViewModel; styles: PanelStyles; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[]; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
+function ReadyContent({ view, styles, telemetry, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, timeline, attention, onDismiss, attentionOpen, toggleAttention }: { view: ObservatoryViewModel; styles: PanelStyles; telemetry?: TelemetryDiagnostic; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[]; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
   const agentCount = view.workspaces.reduce((total, workspace) => total + workspace.agents.length, 0);
   const titles = new Map(view.workspaces.flatMap((workspace) => workspace.agents.map((agent) => [agent.id, agent.title] as const)));
   return (
@@ -473,6 +513,7 @@ function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, ti
       </View>
        <AttentionQueue attention={attention} titles={titles} styles={styles} selectAgent={selectAgent} onDismiss={onDismiss} expanded={attentionOpen} onToggle={toggleAttention} />
        <ModelUsagePanel models={view.models} styles={styles} />
+       <Text style={styles.label}>Telemetry: {telemetry ? `${telemetry.type} · usage ${telemetry.usagePresent ? "received" : "not reported"} · fields: ${telemetry.usageFields.join(", ") || "none"}` : "waiting for an agent event"}</Text>
       <Text accessibilityRole="header" style={styles.sectionTitle}>
         Workspaces
       </Text>
@@ -480,12 +521,13 @@ function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, ti
         <Text style={styles.subtitle}>No agents are currently available in this project.</Text>
       ) : null}
        <View accessibilityLabel="Delegation analysis" style={styles.analysisRow}>
-         <View accessibilityLabel="Delegation tree" style={styles.treePanel}>
-           <Text accessibilityRole="header" style={styles.sectionTitle}>Delegation tree</Text>
+          <View accessibilityLabel="Delegation tree" style={styles.treePanel}>
+            <Text accessibilityRole="header" style={styles.sectionTitle}>Delegation tree</Text>
+            <View accessibilityLabel="Agent lifecycle filters" style={styles.filterLine}>{(["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(value => <Pressable key={value} style={styles.touchTarget} accessibilityRole="checkbox" accessibilityState={{ checked: lifecycle === value }} onPress={() => setLifecycle(lifecycle === value ? undefined : value)}><Text style={styles.label}>{lifecycle === value ? `✓ ${value}` : value}</Text></Pressable>)}</View>
            {view.dashboard.agents.length === 0 ? <Text style={styles.subtitle}>No agents</Text> : view.dashboard.agents.map((agent) => (
               <Pressable key={agent.id} onPress={() => selectAgent(agent.id)} accessibilityRole="button" accessibilityLabel={`${agent.title}, ${agent.model ?? "model unknown"}, ${agent.usage.finalizedTurnCount} finalized turns, ${agent.lifecycle}, depth ${agent.depth}`} style={[styles.row, styles.touchTarget, agent.id === selectedAgentId ? styles.agentPressable : undefined]}>
-               <Text style={[styles.agentTitle, { marginLeft: agent.depth * 12 }]}>{agent.title}</Text>
-               <Text style={styles.status}>{agent.model ?? "Model unknown"} · {agent.usage.recordedTokens.toLocaleString()} finalized tokens · {agent.lifecycle}</Text>
+                <Text style={[styles.agentTitle, agent.lifecycle === "failed" ? styles.lifecycleFailed : agent.lifecycle === "active" ? styles.lifecycleActive : agent.lifecycle === "waiting" ? styles.lifecycleWaiting : styles.lifecycleFinished, { marginLeft: agent.depth * 12 }]}>{agent.title}</Text>
+                <Text style={styles.status}><Text style={styles.agentModel}>{agent.model ?? "Model unknown"}</Text> · {agent.usage.recordedTokens.toLocaleString()} finalized tokens · <Text style={agent.lifecycle === "failed" ? styles.lifecycleFailed : agent.lifecycle === "active" ? styles.lifecycleActive : agent.lifecycle === "waiting" ? styles.lifecycleWaiting : styles.lifecycleFinished}>{agent.lifecycle}</Text></Text>
              </Pressable>
            ))}
          </View>
@@ -582,11 +624,8 @@ function AgentUsageDetail({
   const provisional = turns.find((turn) => turn.provisional);
   return (
     <View>
-      <Text style={styles.detailLine}>Workspace: {workspaceName}</Text>
-      {model ? <Text style={styles.detailLine}>Current model: {model}</Text> : null}
-      <Text style={styles.detailLine}>Finalized tokens: {finalizedTokens.toLocaleString()}</Text>
-      <Text style={styles.detailLine}>Cost state: {costState}</Text>
-      {switchedModels ? <Text style={styles.detailLine}>⇄ Model switched across turns</Text> : null}
+      <Text style={styles.detailLine}>{workspaceName} · {model ?? "Model unknown"}</Text>
+      <Text style={styles.detailLine}>{finalizedTokens.toLocaleString()} finalized tokens · {costState} cost{switchedModels ? " · model switched" : ""}</Text>
       {finalized.length === 0 && !provisional ? (
         <Text style={styles.detailLine}>No reported turn usage.</Text>
       ) : null}
@@ -599,22 +638,6 @@ function AgentUsageDetail({
         </View>
         </ScrollView>
       ) : null}
-      <Text style={styles.detailLine}>
-        {finalized.some((turn) => turn.costUsd !== null)
-          ? `Cost: $${finalized
-              .reduce((sum, turn) => sum + (turn.costUsd ?? 0), 0)
-              .toFixed(4)}${provisional ? " + live" : ""}`
-          : "Cost: unknown"}
-      </Text>
-      <Text style={styles.detailLine}>
-        {(() => {
-          const latest = provisional ?? finalized[finalized.length - 1];
-          if (!latest || latest.contextUsedTokens === null || !latest.contextMaxTokens) {
-            return "Context: unknown";
-          }
-          return `Context: ${Math.round((latest.contextUsedTokens / latest.contextMaxTokens) * 100)}% of window`;
-        })()}
-      </Text>
     </View>
   );
 }

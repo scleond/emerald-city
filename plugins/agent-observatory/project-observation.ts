@@ -42,7 +42,7 @@ export type ObservatoryPaseoApi = Omit<Pick<PaseoApi, "workspaces" | "agents">, 
 
 export type ProjectObservationState =
   | { phase: "loading" }
-  | { phase: "ready"; view: ObservatoryViewModel; attention: AttentionEntry[]; timeline?: Record<string, TimelineState>; dismissalError?: string }
+  | { phase: "ready"; view: ObservatoryViewModel; attention: AttentionEntry[]; timeline?: Record<string, TimelineState>; dismissalError?: string; telemetry?: TelemetryDiagnostic }
   | { phase: "disconnected"; message: string }
   | { phase: "unavailable"; message: string };
 
@@ -53,6 +53,7 @@ interface TimerApi {
 
 const refreshIntervalMs = 15_000;
 export interface TimelineState { entries: NormalizedTimelineEntry[]; cursor?: { epoch: string; seq: number }; hasOlder: boolean; loading: boolean; error?: string }
+export interface TelemetryDiagnostic { type: string; turnId: string | null; usagePresent: boolean; usageFields: string[]; eventFields: string[] }
 
 export class ProjectObservationController {
   private state: ProjectObservationState = { phase: "loading" };
@@ -75,6 +76,7 @@ export class ProjectObservationController {
   private dismissals: AttentionDismissalRecord[] = [];
   private dismissalError?: string;
   private readonly dismissalApi?: ObservatoryDismissalApi;
+  private telemetry?: TelemetryDiagnostic;
 
   constructor(
     private readonly paseo: ObservatoryPaseoApi,
@@ -148,7 +150,8 @@ export class ProjectObservationController {
     if (current.loading || (older && !current.hasOlder)) return;
     this.timelines.set(agentId, { ...current, loading: true, error: undefined }); this.publishReady();
     try {
-      const page = await this.paseo.agents.ref(agentId).timeline.refetch({ limit: TIMELINE_DETAIL_LIMIT, ...(older && current.cursor ? { cursor: current.cursor } : {}), direction: "backward" });
+      const page = await this.paseo.agents.ref(agentId).timeline.refetch({ limit: TIMELINE_DETAIL_LIMIT, ...(older && current.cursor ? { cursor: current.cursor, direction: "before" } : { direction: "tail" }) });
+      this.ingestTimelineUsage(agentId, page.entries ?? []);
       const entries = (page.entries ?? []).map(normalizeTimelineEntry);
       this.timelines.set(agentId, { entries: older ? [...current.entries, ...entries] : entries.slice(0, 50), cursor: page.pageInfo?.cursor, hasOlder: page.pageInfo?.hasOlder ?? false, loading: false });
     } catch (error) { this.timelines.set(agentId, { ...current, loading: false, error: error instanceof Error ? error.message : String(error) }); }
@@ -156,7 +159,8 @@ export class ProjectObservationController {
   }
   async loadTimelineSummary(agentId: string): Promise<void> {
     try {
-      const page = await this.paseo.agents.ref(agentId).timeline.refetch({ limit: TIMELINE_SUMMARY_LIMIT, direction: "backward" });
+      const page = await this.paseo.agents.ref(agentId).timeline.refetch({ limit: TIMELINE_SUMMARY_LIMIT, direction: "tail" });
+      this.ingestTimelineUsage(agentId, page.entries ?? []);
       this.timelines.set(agentId, { entries: (page.entries ?? []).map(normalizeTimelineEntry), cursor: page.pageInfo?.cursor, hasOlder: page.pageInfo?.hasOlder ?? false, loading: false });
       this.publishReady();
     } catch (error) {
@@ -374,6 +378,13 @@ export class ProjectObservationController {
   private receiveAgentStream(payload: ObservatoryAgentStreamPayload): void {
     if (!this.active || !this.agents.has(payload.agentId)) return;
     const event = payload.event;
+    this.telemetry = {
+      type: event.type,
+      turnId: event.turnId ?? null,
+      usagePresent: event.usage !== undefined,
+      usageFields: event.usage ? Object.keys(event.usage).sort() : [],
+      eventFields: Object.keys(event).filter((key) => key !== "usage").sort(),
+    };
     const model = this.agentModels.get(payload.agentId) ?? null;
     const usageEvent = toUsageEvent(event);
     if (event.type === "model_changed") {
@@ -387,6 +398,22 @@ export class ProjectObservationController {
       reduceAgentUsage(this.usage.get(payload.agentId) ?? emptyAgentUsage(), usageEvent, model),
     );
     this.publishReady();
+  }
+
+  private ingestTimelineUsage(agentId: string, entries: readonly RawTimelineEntry[]): void {
+    for (const entry of entries) {
+      const item = entry.item && typeof entry.item === "object" ? entry.item as Record<string, unknown> : {};
+      const type = String(item.type ?? item.kind ?? "");
+      const usage = item.usage && typeof item.usage === "object" ? item.usage as ObservatoryUsageFields : undefined;
+      if (!usage || !["usage_updated", "turn_completed"].includes(type)) continue;
+      const event: AgentUsageEvent = {
+        kind: type === "turn_completed" ? "final" : "provisional",
+        turnId: typeof item.turnId === "string" ? item.turnId : undefined,
+        model: typeof item.model === "string" ? item.model : undefined,
+        usage,
+      };
+      this.usage.set(agentId, reduceAgentUsage(this.usage.get(agentId) ?? emptyAgentUsage(), event, this.agentModels.get(agentId) ?? null));
+    }
   }
 
   private publishReady(): void {
@@ -415,6 +442,7 @@ export class ProjectObservationController {
       }),
       timeline: Object.fromEntries(this.timelines),
       ...(this.dismissalError ? { dismissalError: this.dismissalError } : {}),
+      ...(this.telemetry ? { telemetry: this.telemetry } : {}),
     });
   }
 

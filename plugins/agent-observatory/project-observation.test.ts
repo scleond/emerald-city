@@ -56,6 +56,25 @@ describe("ProjectObservationController", () => {
     expect(clearInterval).toHaveBeenCalledWith(42);
   });
 
+  it("projects finalized usage received from a completed turn", async () => {
+    const harness = createPaseoHarness();
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers());
+    await controller.start();
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", turnId: "turn-1", usage: { inputTokens: 10, cachedInputTokens: 4, outputTokens: 3, totalCostUsd: 0.12 } } });
+    expect(controller.getSnapshot()).toMatchObject({ phase: "ready", view: { dashboard: { recordedTokens: 13, reportedCostUsd: 0.12 } } });
+    const snapshot = controller.getSnapshot();
+    if (snapshot.phase === "ready") expect(snapshot.view.dashboard.agents).toEqual(expect.arrayContaining([expect.objectContaining({ id: "agent-1", usage: expect.objectContaining({ recordedTokens: 13 }) })]));
+    controller.stop();
+  });
+
+  it("backfills usage from historical timeline entries", async () => {
+    const harness = createPaseoHarness({ agents: [agent("agent-1", "running", { workspaceId: "workspace-1" })], workspaces: [workspace("workspace-1", "Main")], timeline: [{ item: { type: "turn_completed", turnId: "historical-1", usage: { inputTokens: 20, cachedInputTokens: 5, outputTokens: 4, totalCostUsd: 0.2 } } }] });
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers());
+    await controller.start();
+    expect(controller.getSnapshot()).toMatchObject({ phase: "ready", view: { dashboard: { recordedTokens: 24, reportedCostUsd: 0.2 } } });
+    controller.stop();
+  });
+
   it("keeps the project view when the opening workspace is archived", async () => {
     const harness = createPaseoHarness();
     const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers());
@@ -212,6 +231,7 @@ function createPaseoHarness(options: {
 } = {}) {
   let workspaceHandler: (update: unknown) => void = () => undefined;
   let agentHandler: (update: unknown) => void = () => undefined;
+  const timelineHandlers = new Map<string, (payload: unknown) => void>();
   const unsubscribeWorkspace = vi.fn();
   const unsubscribeAgent = vi.fn();
   const workspaces = options.workspaces ?? [
@@ -252,6 +272,7 @@ function createPaseoHarness(options: {
       }),
       ref: vi.fn(() => ({
         timeline: {
+          subscribe: vi.fn((handler: (payload: unknown) => void) => { timelineHandlers.set("agent-1", handler); return vi.fn(); }),
           refetch: vi.fn(async () => {
             maybeThrow();
             return { entries: options.timeline ?? [], pageInfo: { hasOlder: false } };
@@ -271,6 +292,7 @@ function createPaseoHarness(options: {
     unsubscribeAgent,
     publishWorkspace: (update: unknown) => workspaceHandler(update),
     publishAgent: (update: unknown) => agentHandler(update),
+    publishTimeline: (agentId: string, payload: unknown) => timelineHandlers.get(agentId)?.(payload),
     recover: () => {
       currentError = undefined;
     },
