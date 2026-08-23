@@ -9,7 +9,7 @@ import {
   type TelemetryDiagnostic,
 } from "./project-observation";
 import { observatoryDismissalContracts, type AttentionDismissalRecord } from "./dismissals";
-import { lifecycleStyle, modelUsageAccessibilityLabel, observatoryLayout, turnAccessibilityLabel } from "./accessibility";
+import { lifecycleStyle, modelUsageAccessibilityLabel, observatoryLayout, turnAccessibilityLabel, usageChartPalette } from "./accessibility";
 
 export function AgentObservatoryPanel({
   theme,
@@ -242,12 +242,12 @@ export function AgentObservatoryPanel({
         backgroundColor: theme.colors.surface0,
       },
       segmentFresh: {
-        backgroundColor: theme.colors.accent,
+        backgroundColor: usageChartPalette(theme.colors).fresh,
       },
       segmentCached: {
-        backgroundColor: theme.colors.statusDanger,
+        backgroundColor: usageChartPalette(theme.colors).cached,
       },
-      segmentOutput: { backgroundColor: theme.colors.accentForeground },
+      segmentOutput: { backgroundColor: usageChartPalette(theme.colors).output },
       legend: {
         flexDirection: "row" as const,
         flexWrap: "wrap" as const,
@@ -262,19 +262,19 @@ export function AgentObservatoryPanel({
         width: 10,
         height: 10,
         borderRadius: 2,
-        backgroundColor: theme.colors.accent,
+        backgroundColor: usageChartPalette(theme.colors).fresh,
       },
       legendSwatchCached: {
         width: 10,
         height: 10,
         borderRadius: 2,
-        backgroundColor: theme.colors.statusDanger,
+        backgroundColor: usageChartPalette(theme.colors).cached,
       },
       legendSwatchOutput: {
         width: 10,
         height: 10,
         borderRadius: 2,
-        backgroundColor: theme.colors.accentForeground,
+        backgroundColor: usageChartPalette(theme.colors).output,
       },
       agentPressable: {
         paddingVertical: layout.compact ? 8 : 10,

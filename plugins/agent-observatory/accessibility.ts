@@ -1,5 +1,11 @@
 import type { AgentLifecycle, ModelUsageBar } from "./observation";
 
+export type UsageChartPalette = { fresh: string; cached: string; output: string };
+
+export function usageChartPalette(colors: { accent: string; accentForeground: string; statusDanger: string }): UsageChartPalette {
+  return { fresh: colors.accent, cached: colors.accentForeground, output: colors.statusDanger };
+}
+
 export type ObservatoryLayout = "compact" | "medium" | "wide";
 
 export type LifecycleStyle = "active" | "waiting" | "finished" | "failed" | "other";
