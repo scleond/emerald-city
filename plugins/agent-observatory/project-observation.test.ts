@@ -205,6 +205,19 @@ describe("ProjectObservationController", () => {
     controller.stop();
   });
 
+  it("retains metadata when persisted turns are reloaded into history analytics", async () => {
+    const stored: NormalizedUsageTurn[] = [{ projectId: "project-1", workspaceId: "workspace-1", agentId: "agent-1", turnId: "reloaded", observedAt: "2026-08-23T18:00:00.000Z", startedAt: null, completedAt: "2026-08-23T18:00:00.000Z", model: "alias", canonicalModelId: "model-1", provider: "Provider A", displayName: "Friendly", inputTokens: 10, cachedInputTokens: 2, outputTokens: 3, contextUsedTokens: null, contextMaxTokens: null, costUsd: 0.1, costState: "complete", confidence: "high" }];
+    const usageStore: UsageTurnStore = { async get() { return stored; }, async put(turn) { stored.push(turn); return stored; } };
+    const controller = new ProjectObservationController(createPaseoHarness().paseo, "workspace-1", noTimers(), undefined, undefined, usageStore);
+    await controller.start();
+    const snapshot = controller.getSnapshot();
+    expect(snapshot.phase).toBe("ready");
+    if (snapshot.phase !== "ready") throw new Error("expected ready snapshot");
+    const history = snapshot.historicalUsage?.["30d"];
+    expect(history?.models[0]).toMatchObject({ key: "model-1::Provider A::Friendly", canonicalModelId: "model-1", provider: "Provider A", displayName: "Friendly" });
+    controller.stop();
+  });
+
   it("preserves canonical metadata while backfilling historical timeline usage", async () => {
     const stored: NormalizedUsageTurn[] = [];
     const usageStore: UsageTurnStore = {
