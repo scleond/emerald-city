@@ -83,12 +83,28 @@ export function usageIdentity(turn: ObservatoryAgentUsageTurn): string {
   return turn.turnId ? `turn:${turn.turnId}` : fallbackUsageIdentity(turn.model, { inputTokens: turn.inputTokens ?? undefined, cachedInputTokens: turn.cachedInputTokens ?? undefined, outputTokens: turn.outputTokens ?? undefined, totalCostUsd: turn.costUsd ?? undefined, contextWindowUsedTokens: turn.contextUsedTokens ?? undefined, contextWindowMaxTokens: turn.contextMaxTokens ?? undefined });
 }
 
-function fallbackTurnIdentity(turn: ObservatoryAgentUsageTurn): string {
-  return fallbackUsageIdentity(turn.model, { inputTokens: turn.inputTokens ?? undefined, cachedInputTokens: turn.cachedInputTokens ?? undefined, outputTokens: turn.outputTokens ?? undefined, totalCostUsd: turn.costUsd ?? undefined, contextWindowUsedTokens: turn.contextUsedTokens ?? undefined, contextWindowMaxTokens: turn.contextMaxTokens ?? undefined });
-}
-
 function turnIdentity(turn: ObservatoryAgentUsageTurn): string {
   return usageIdentity(turn);
+}
+
+export function provisionalMatchIndex(turns: readonly ObservatoryAgentUsageTurn[], next: ObservatoryAgentUsageTurn): number {
+  const exact = turns.findIndex((turn) => turnIdentity(turn) === turnIdentity(next) && turn.observedAt === next.observedAt);
+  if (exact >= 0) return exact;
+  const candidates = turns.map((turn, index) => ({ turn, index })).filter(({ turn }) => turn.turnId === null && turn.model === next.model);
+  if (candidates.length === 0) return -1;
+  if (candidates.length === 1) {
+    const current = candidates[0]!.turn;
+    const currentTotal = (current.inputTokens ?? 0) + (current.outputTokens ?? 0);
+    const nextTotal = (next.inputTokens ?? 0) + (next.outputTokens ?? 0);
+    if (nextTotal <= currentTotal) return -1;
+  }
+  const nextAt = next.observedAt ? Date.parse(next.observedAt) : NaN;
+  return candidates.sort((a, b) => {
+    const aAt = a.turn.observedAt ? Date.parse(a.turn.observedAt) : NaN;
+    const bAt = b.turn.observedAt ? Date.parse(b.turn.observedAt) : NaN;
+    if (Number.isFinite(nextAt) && Number.isFinite(aAt) && Number.isFinite(bAt)) return Math.abs(nextAt - aAt) - Math.abs(nextAt - bAt);
+    return b.index - a.index;
+  })[0]!.index;
 }
 
 export function reduceAgentUsage(
@@ -100,7 +116,7 @@ export function reduceAgentUsage(
     const next = toUsageTurn(event, agentModel);
     const provisional = [...(record.provisionalTurns ?? (record.provisionalTurn ? [record.provisionalTurn] : []))];
     const identity = turnIdentity(next);
-    const index = provisional.findIndex((turn) => turnIdentity(turn) === identity && turn.observedAt === next.observedAt);
+    const index = provisionalMatchIndex(provisional, next);
     if (index >= 0) provisional[index] = next;
     else provisional.push(next);
     return { ...record, provisionalTurn: provisional[provisional.length - 1] ?? null, provisionalTurns: provisional };

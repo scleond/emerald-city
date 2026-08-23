@@ -38,6 +38,7 @@ describe("usage turn store", () => {
     expect(result.finalizedTurns).toHaveLength(1);
   });
 
+
   it("replaces an anonymous provisional turn with its final event", () => {
     const provisional = reduceAgentUsage(emptyAgentUsage(), { kind: "provisional", model: "model", usage: { inputTokens: 10 } });
     const final = reduceAgentUsage(provisional, { kind: "final", model: "model", usage: { inputTokens: 10 } });

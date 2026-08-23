@@ -87,6 +87,7 @@ export class ProjectObservationController {
   private readonly historicalTurns = new Map<string, readonly NormalizedUsageTurn[]>();
   private telemetry?: TelemetryDiagnostic;
   private readonly anonymousPersistenceIds = new Map<string, Map<string, string[]>>();
+  private readonly anonymousPredecessors = new Map<string, { model: string; identity: string; key: string; at: number; tokens: number }>();
 
   constructor(
     private readonly paseo: ObservatoryPaseoApi,
@@ -152,6 +153,7 @@ export class ProjectObservationController {
     this.historicalTurns.clear();
     this.agentModels.clear();
     this.anonymousPersistenceIds.clear();
+    this.anonymousPredecessors.clear();
     this.directorySubscriptionsActive = false;
     if (this.timer !== null) {
       this.timers.clearInterval(this.timer);
@@ -457,17 +459,31 @@ export class ProjectObservationController {
     if (event.kind === "provisional") {
       const key = fallbackUsageIdentity(event.model ?? model, event.usage);
       const queue = identities.get(key) ?? [];
+      const modelName = event.model ?? model ?? "unknown";
+      const at = event.observedAt ? Date.parse(event.observedAt) : NaN;
+      const tokens = (event.usage?.inputTokens ?? 0) + (event.usage?.outputTokens ?? 0);
+      const predecessor = this.anonymousPredecessors.get(agentId);
+      if (predecessor && predecessor.model === modelName && Number.isFinite(at) && predecessor.at < at && tokens > predecessor.tokens) {
+        const oldQueue = identities.get(predecessor.key);
+        oldQueue?.splice(oldQueue.indexOf(predecessor.identity), 1);
+        if (oldQueue?.length === 0) identities.delete(predecessor.key);
+        queue.push(predecessor.identity);
+        identities.set(key, queue);
+        this.anonymousPredecessors.set(agentId, { model: modelName, identity: predecessor.identity, key, at, tokens });
+        return predecessor.identity;
+      }
       const identity = queue.find((candidate) => candidate.endsWith(`:${event.observedAt ?? ""}`)) ?? `${key}:${event.observedAt ?? ""}`;
       if (queue.includes(identity)) return identity;
       queue.push(identity);
       identities.set(key, queue);
+      this.anonymousPredecessors.set(agentId, { model: modelName, identity, key, at, tokens });
       return identity;
     }
     const key = fallbackUsageIdentity(event.model ?? model, event.usage);
     const matching = identities.get(key);
     const identity = matching?.shift();
     if (matching && matching.length === 0) identities.delete(key);
-    return identity ?? `final:${fallbackUsageIdentity(event.model ?? model, event.usage, event.observedAt ?? "")}`;
+    return identity ?? `final:${fallbackUsageIdentity(event.model ?? model, event.usage)}`;
   }
 
   private async persistUsage(agentId: string, event: AgentUsageEvent, fallbackModel: string | null, persistenceId?: string, observedAt = new Date(this.now()).toISOString()): Promise<void> {
