@@ -134,7 +134,7 @@ describe("usage turn store", () => {
       turn({ turnId: "a", workspaceId: "workspace-b", model: "provider-alias", canonicalModelId: "model-1", provider: "Provider A", displayName: "Friendly model", inputTokens: 100, cachedInputTokens: 25, outputTokens: 20, costUsd: 1 }),
       turn({ turnId: "b", workspaceId: "workspace-a", model: "provider-alias", canonicalModelId: "model-1", provider: "Provider A", displayName: "Friendly model", inputTokens: 50, cachedInputTokens: 25, outputTokens: 10, costUsd: 2 }),
     ], "30d", Date.parse("2026-01-11T00:00:00.000Z"));
-    expect(result.models).toEqual([expect.objectContaining({ key: "model-1", provider: "Provider A", displayName: "Friendly model", finalizedTurnCount: 2, cachePercentage: 33.33333333333333, reportedCostUsd: 3, costState: "exact" })]);
+    expect(result.models).toEqual([expect.objectContaining({ key: "model-1::Provider A::Friendly model", canonicalModelId: "model-1", provider: "Provider A", displayName: "Friendly model", finalizedTurnCount: 2, cachePercentage: 33.33333333333333, reportedCostUsd: 3, costState: "exact" })]);
     expect(result.workspaces.map(({ key, reportedCostUsd }) => [key, reportedCostUsd])).toEqual([["workspace-b", 1], ["workspace-a", 2]]);
   });
 

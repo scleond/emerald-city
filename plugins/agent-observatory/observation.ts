@@ -19,6 +19,9 @@ export type AgentUsageEvent =
 export interface ObservatoryAgentUsageTurn {
   turnId: string | null;
   model: string | null;
+  canonicalModelId?: string | null;
+  provider?: string | null;
+  displayName?: string | null;
   inputTokens: number | null;
   cachedInputTokens: number | null;
   outputTokens: number | null;
@@ -65,6 +68,9 @@ function toUsageTurn(
   return {
     turnId: event.turnId ?? null,
     model: event.model ?? fallbackModel,
+    canonicalModelId: event.canonicalModelId ?? event.model ?? fallbackModel,
+    provider: event.provider ?? null,
+    displayName: event.displayName ?? event.model ?? fallbackModel,
     inputTokens: usage.inputTokens ?? null,
     cachedInputTokens: usage.cachedInputTokens ?? null,
     outputTokens: usage.outputTokens ?? null,

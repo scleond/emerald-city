@@ -109,7 +109,8 @@ function analytics(turns: readonly NormalizedUsageTurn[], dimension: "model" | "
     const costState: HistoricalCostState = known === 0 ? "unknown" : estimated > 0 ? "estimated" : free === known ? "free-model" : "exact";
     const first = items[0];
     const canonicalModelId = dimension === "model" ? first.canonicalModelId ?? first.model ?? "unknown" : null;
-    return { key: dimension === "model" ? canonicalModelId! : metadataKey, canonicalModelId, provider: dimension === "model" ? first.provider ?? null : null, displayName: dimension === "model" ? first.displayName ?? first.model ?? canonicalModelId! : metadataKey,
+    const publicKey = dimension === "model" ? `${canonicalModelId!}::${first.provider ?? "unknown-provider"}::${first.displayName ?? canonicalModelId!}` : metadataKey;
+    return { key: publicKey, canonicalModelId, provider: dimension === "model" ? first.provider ?? null : null, displayName: dimension === "model" ? first.displayName ?? first.model ?? canonicalModelId! : metadataKey,
       inputTokens, cachedInputTokens, freshInputTokens: inputTokens - cachedInputTokens, outputTokens, recordedTokens: inputTokens + outputTokens,
       finalizedTurnCount: items.length, averageInputTokens: inputTokens / items.length, averageOutputTokens: outputTokens / items.length,
       cachePercentage: inputTokens === 0 ? 0 : cachedInputTokens / inputTokens * 100, reportedCostUsd: known === 0 ? null : cost, costState };

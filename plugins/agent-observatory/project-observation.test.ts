@@ -205,6 +205,20 @@ describe("ProjectObservationController", () => {
     controller.stop();
   });
 
+  it("preserves canonical metadata while backfilling historical timeline usage", async () => {
+    const stored: NormalizedUsageTurn[] = [];
+    const usageStore: UsageTurnStore = {
+      async get() { return stored; },
+      async put(turn) { stored.push(turn); return stored; },
+    };
+    const harness = createPaseoHarness({ agents: [agent("agent-1", "running", { workspaceId: "workspace-1" })], workspaces: [workspace("workspace-1", "Main")], timeline: [{ item: { type: "turn_completed", turnId: "historical-meta", model: "alias", canonicalModelId: "model-1", provider: "Provider A", displayName: "Friendly", usage: { inputTokens: 2 } } }] });
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers(), undefined, undefined, usageStore);
+    await controller.start();
+    await vi.waitFor(() => expect(stored).toHaveLength(1));
+    expect(stored[0]).toMatchObject({ canonicalModelId: "model-1", provider: "Provider A", displayName: "Friendly" });
+    controller.stop();
+  });
+
   it("keeps the project view when the opening workspace is archived", async () => {
     const harness = createPaseoHarness();
     const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers());

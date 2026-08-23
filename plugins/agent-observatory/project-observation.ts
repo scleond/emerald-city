@@ -484,7 +484,7 @@ export class ProjectObservationController {
       const type = String(item.type ?? item.kind ?? "");
       const usage = item.usage && typeof item.usage === "object" ? item.usage as ObservatoryUsageFields : undefined;
       if (!usage || !["usage_updated", "turn_completed"].includes(type)) continue;
-      const event = normalizeUsageEvent({ type, turnId: item.turnId, model: item.model, usage, timestamp: entry.timestamp });
+      const event = normalizeUsageEvent({ type, turnId: item.turnId, model: item.model, canonicalModelId: item.canonicalModelId, provider: item.provider, displayName: item.displayName, usage, timestamp: entry.timestamp });
       if (!event) continue;
       const persistenceId = this.persistenceIdentity(agentId, event, event.model ?? this.agentModels.get(agentId) ?? null);
       this.usage.set(agentId, reduceAgentUsage(this.usage.get(agentId) ?? emptyAgentUsage(), event, this.agentModels.get(agentId) ?? null));
