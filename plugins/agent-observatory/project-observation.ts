@@ -85,7 +85,7 @@ export class ProjectObservationController {
   private readonly usageStore?: UsageTurnStore;
   private readonly historicalTurns = new Map<string, readonly NormalizedUsageTurn[]>();
   private telemetry?: TelemetryDiagnostic;
-  private readonly anonymousPersistenceIds = new Map<string, string>();
+  private readonly anonymousPersistenceIds = new Map<string, Map<string, string>>();
 
   constructor(
     private readonly paseo: ObservatoryPaseoApi,
@@ -426,11 +426,7 @@ export class ProjectObservationController {
       this.publishReady();
       return;
     }
-    const persistenceId = !usageEvent.turnId && usageEvent.kind === "provisional"
-      ? (this.anonymousPersistenceIds.get(payload.agentId) ?? fallbackUsageIdentity(model, usageEvent.usage))
-      : !usageEvent.turnId ? this.anonymousPersistenceIds.get(payload.agentId) : undefined;
-    if (!usageEvent.turnId && usageEvent.kind === "provisional" && persistenceId) this.anonymousPersistenceIds.set(payload.agentId, persistenceId);
-    if (!usageEvent.turnId && usageEvent.kind === "final") this.anonymousPersistenceIds.delete(payload.agentId);
+    const persistenceId = this.persistenceIdentity(payload.agentId, usageEvent, model);
     this.usage.set(
       payload.agentId,
       reduceAgentUsage(this.usage.get(payload.agentId) ?? emptyAgentUsage(), usageEvent, model),
@@ -447,14 +443,26 @@ export class ProjectObservationController {
       if (!usage || !["usage_updated", "turn_completed"].includes(type)) continue;
       const event = normalizeUsageEvent({ type, turnId: item.turnId, model: item.model, usage, timestamp: entry.timestamp });
       if (!event) continue;
-      const persistenceId = !event.turnId && event.kind === "provisional"
-        ? (this.anonymousPersistenceIds.get(agentId) ?? fallbackUsageIdentity(event.model ?? this.agentModels.get(agentId), event.usage))
-        : !event.turnId ? this.anonymousPersistenceIds.get(agentId) : undefined;
-      if (!event.turnId && event.kind === "provisional" && persistenceId) this.anonymousPersistenceIds.set(agentId, persistenceId);
-      if (!event.turnId && event.kind === "final") this.anonymousPersistenceIds.delete(agentId);
+      const persistenceId = this.persistenceIdentity(agentId, event, event.model ?? this.agentModels.get(agentId) ?? null);
       this.usage.set(agentId, reduceAgentUsage(this.usage.get(agentId) ?? emptyAgentUsage(), event, this.agentModels.get(agentId) ?? null));
       void this.persistUsage(agentId, event, event.model ?? this.agentModels.get(agentId) ?? null, persistenceId, entry.timestamp);
     }
+  }
+
+  private persistenceIdentity(agentId: string, event: AgentUsageEvent, model: string | null): string | undefined {
+    if (event.turnId) return undefined;
+    let identities = this.anonymousPersistenceIds.get(agentId);
+    if (!identities) { identities = new Map(); this.anonymousPersistenceIds.set(agentId, identities); }
+    if (event.kind === "provisional") {
+      const key = fallbackUsageIdentity(event.model ?? model, event.usage);
+      const existing = identities.get(key);
+      if (existing) return existing;
+      identities.set(key, key);
+      return key;
+    }
+    const first = identities.keys().next().value as string | undefined;
+    if (first) identities.delete(first);
+    return first;
   }
 
   private async persistUsage(agentId: string, event: AgentUsageEvent, fallbackModel: string | null, persistenceId?: string, observedAt = new Date(this.now()).toISOString()): Promise<void> {

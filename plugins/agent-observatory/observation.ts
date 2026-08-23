@@ -34,6 +34,7 @@ export interface ObservatoryAgentUsageTurn {
 export interface AgentUsageRecord {
   finalizedTurns: ObservatoryAgentUsageTurn[];
   provisionalTurn: ObservatoryAgentUsageTurn | null;
+  provisionalTurns?: ObservatoryAgentUsageTurn[];
 }
 
 export function hasUsableUsage(usage: ObservatoryUsageFields | null | undefined): usage is ObservatoryUsageFields {
@@ -48,7 +49,7 @@ export function normalizeUsageEvent(input: { type?: string; kind?: string; turnI
 }
 
 export function emptyAgentUsage(): AgentUsageRecord {
-  return { finalizedTurns: [], provisionalTurn: null };
+  return { finalizedTurns: [], provisionalTurn: null, provisionalTurns: [] };
 }
 
 function toUsageTurn(
@@ -92,25 +93,33 @@ export function reduceAgentUsage(
   agentModel: string | null = null,
 ): AgentUsageRecord {
   if (event.kind === "provisional") {
-    return { ...record, provisionalTurn: toUsageTurn(event, agentModel) };
+    const next = toUsageTurn(event, agentModel);
+    const provisional = [...(record.provisionalTurns ?? (record.provisionalTurn ? [record.provisionalTurn] : []))];
+    const identity = turnIdentity(next);
+    const index = provisional.findIndex((turn) => turnIdentity(turn) === identity);
+    if (index >= 0) provisional[index] = next;
+    else provisional.push(next);
+    return { ...record, provisionalTurn: provisional[provisional.length - 1] ?? null, provisionalTurns: provisional };
   }
   const next = toUsageTurn(event, agentModel);
   const identity = turnIdentity(next);
   const finalized = record.finalizedTurns.filter((turn) => turnIdentity(turn) !== identity);
   finalized.push(next);
+  const provisional = [...(record.provisionalTurns ?? (record.provisionalTurn ? [record.provisionalTurn] : []))];
+  const matching = event.turnId
+    ? (() => { const identified = provisional.findIndex((turn) => turn.turnId === event.turnId); return identified >= 0 ? identified : provisional.findIndex((turn) => turn.turnId === null); })()
+    : provisional.findIndex((turn) => turn.turnId === null);
+  if (matching >= 0) provisional.splice(matching, 1);
   return {
     finalizedTurns: finalized,
-    provisionalTurn:
-      !event.turnId || record.provisionalTurn?.turnId === event.turnId || record.provisionalTurn?.turnId === null
-        ? null
-        : record.provisionalTurn,
+    provisionalTurn: provisional[provisional.length - 1] ?? null,
+    provisionalTurns: provisional,
   };
 }
 
 export function agentUsageTurns(record: AgentUsageRecord): ObservatoryAgentUsageTurn[] {
-  return record.provisionalTurn
-    ? [...record.finalizedTurns, record.provisionalTurn]
-    : [...record.finalizedTurns];
+  const provisional = record.provisionalTurns ?? (record.provisionalTurn ? [record.provisionalTurn] : []);
+  return [...record.finalizedTurns, ...provisional];
 }
 
 export function finalizedTurnScale(turns: readonly ObservatoryAgentUsageTurn[]): number {
