@@ -37,18 +37,17 @@ export interface AgentUsageRecord {
   provisionalTurns?: ObservatoryAgentUsageTurn[];
 }
 
+const supportedUsageFields = new Set(["inputTokens", "cachedInputTokens", "outputTokens", "totalCostUsd", "contextWindowUsedTokens", "contextWindowMaxTokens"]);
+
 export function hasUsableUsage(usage: unknown): usage is ObservatoryUsageFields {
-  return typeof usage === "object" && usage !== null && !Array.isArray(usage) && Object.values(usage).some((value) => typeof value === "number" && Number.isFinite(value));
+  return typeof usage === "object" && usage !== null && !Array.isArray(usage) && Object.entries(usage).some(([key, value]) => supportedUsageFields.has(key) && typeof value === "number" && Number.isFinite(value));
 }
 
 export function normalizeUsageEvent(input: { type?: unknown; kind?: unknown; turnId?: unknown; model?: unknown; usage?: unknown; timestamp?: unknown; observedAt?: unknown }): AgentUsageEvent | null {
   const type = input.type ?? input.kind;
   if (type !== "usage_updated" && type !== "turn_completed") return null;
   if (!hasUsableUsage(input.usage)) return null;
-  const usage = Object.fromEntries(Object.entries(input.usage).filter(([key, value]) => key in {
-    inputTokens: true, cachedInputTokens: true, outputTokens: true, totalCostUsd: true,
-    contextWindowUsedTokens: true, contextWindowMaxTokens: true,
-  } && typeof value === "number" && Number.isFinite(value))) as ObservatoryUsageFields;
+  const usage = Object.fromEntries(Object.entries(input.usage).filter(([key, value]) => supportedUsageFields.has(key) && typeof value === "number" && Number.isFinite(value))) as ObservatoryUsageFields;
   if (!hasUsableUsage(usage)) return null;
   const observedAt = input.timestamp ?? input.observedAt;
   return { kind: type === "turn_completed" ? "final" : "provisional", turnId: typeof input.turnId === "string" ? input.turnId : undefined, model: typeof input.model === "string" ? input.model : undefined, usage, observedAt: typeof observedAt === "string" ? observedAt : undefined };

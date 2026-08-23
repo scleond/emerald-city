@@ -441,26 +441,28 @@ export class ProjectObservationController {
     const event = payload.event;
     if (typeof event !== "object" || event === null || typeof event.type !== "string") return;
     const eventFields = Object.keys(event).filter((key) => key !== "usage").sort();
+    const usageEvent = normalizeUsageEvent(event);
+    const usage = usageEvent?.usage;
     this.telemetry = {
       type: event.type,
       turnId: typeof event.turnId === "string" ? event.turnId : null,
-      usagePresent: hasUsableUsage(event.usage),
-      usageFields: event.usage && typeof event.usage === "object" && !Array.isArray(event.usage) ? Object.keys(event.usage).sort() : [],
+      usagePresent: usage !== undefined,
+      usageFields: usage ? Object.keys(usage).sort() : [],
       eventFields,
-      health: event.type === "turn_completed" && hasUsableUsage(event.usage) ? "reported" : event.type === "usage_updated" && hasUsableUsage(event.usage) ? "pending" : "not-reported",
+      health: event.type === "turn_completed" && usage ? "reported" : event.type === "usage_updated" && usage ? "pending" : "not-reported",
       lastSuccessAt: this.telemetryLastSuccessAt,
       stale: this.telemetryLastSuccessAt === null || this.now() - this.telemetryLastSuccessAt >= telemetryStaleAfterMs,
     };
-    if (hasUsableUsage(event.usage)) {
+    if (usage) {
       this.telemetryLastSuccessAt = this.now();
       this.telemetry.lastSuccessAt = this.telemetryLastSuccessAt;
       this.telemetry.stale = false;
     }
     const model = this.agentModels.get(payload.agentId) ?? null;
-    const usageEvent = normalizeUsageEvent(event);
     if (event.type === "model_changed") {
-      const nextModel = event.runtimeInfo?.model ?? null;
+      const nextModel = event.runtimeInfo && typeof event.runtimeInfo === "object" && typeof event.runtimeInfo.model === "string" ? event.runtimeInfo.model : null;
       if (nextModel !== null) this.agentModels.set(payload.agentId, nextModel);
+      this.publishReady();
       return;
     }
     if (!usageEvent) {

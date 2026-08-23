@@ -99,6 +99,29 @@ describe("ProjectObservationController", () => {
     controller.stop();
   });
 
+  it("ignores unknown and inherited usage fields in telemetry diagnostics", async () => {
+    const harness = createPaseoHarness();
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers());
+    await controller.start();
+    const usage = Object.create({ toString: 99 });
+    usage.unknownTokens = 10;
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", usage } });
+    expect(controller.getSnapshot()).toMatchObject({ telemetry: { usagePresent: false, health: "not-reported", usageFields: [] } });
+    controller.stop();
+  });
+
+  it("publishes model changes even with malformed runtime info", async () => {
+    const harness = createPaseoHarness();
+    const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers());
+    const listener = vi.fn();
+    controller.subscribe(listener);
+    await controller.start();
+    listener.mockClear();
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "model_changed", runtimeInfo: "malformed" } });
+    expect(listener).toHaveBeenCalled();
+    controller.stop();
+  });
+
   it("makes lifecycle calls idempotent", async () => {
     const harness = createPaseoHarness();
     const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers());
