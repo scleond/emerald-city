@@ -156,16 +156,24 @@ excluding tests/docs — no `webview`, `browser`, `prototype`, or `http.*server`
 Only Paseo client/plugin imports (`@getpaseo/plugin`, `@getpaseo/client`), `react`,
 `react-native`, and `zod` are used. See `QUALIFICATION.md` for the grep output.
 
-## Layout and theme
+## Responsive layout, accessibility, and theme
+
+The dashboard keeps four summary cards in a wide row, wraps them to two-by-two at medium widths,
+and uses one column in compact mode. The model panel remains full width; analysis shares a row
+unless compact mode requires a single column. Per-turn charts scroll horizontally with a minimum
+content width so mobile columns remain readable.
 
 All text and surfaces use Paseo theme colors (`theme.colors.surface0`, `foreground`,
-`foregroundMuted`, `accent`, `accentForeground`, `statusDanger`) and adapt to
-`layout.compact` (wide desktop vs compact/mobile). Verified by:
+`foregroundMuted`, `accent`, `accentForeground`, `statusDanger`) and adapt to `layout.compact`.
+Verified by:
 
 - `grep` for `theme.colors` (27 usages) and `layout.compact` (22 usages) in `main.client.tsx`.
 - No hardcoded color literals remain in production code (the previous `#e5e7eb`/`#374151`
   dismiss-button literals were replaced with `theme.colors.accent`/`accentForeground`).
-- Manual checklist steps 9–10 exercise both layouts and light/dark themes.
+- Filter controls expose checkbox state and 44px touch targets. Model charts expose exact token
+  composition and cost labels; turn charts identify live/model state and token totals.
+- Manual checklist steps 9–13 exercise wide, medium, compact/mobile, light/dark, live usage,
+  unknown cost, and partial timeline failure.
 
 ## Manual smoke verification
 

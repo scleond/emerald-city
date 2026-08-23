@@ -1,4 +1,4 @@
-# Agent Observatory — Qualification for Release (#28)
+# Agent Observatory — Responsive Qualification for Release (#35)
 
 Parent #18. This note qualifies the project-scoped Agent Observatory as a trustworthy,
 independently deployable Paseo plugin. It records installation, reload, and manual smoke

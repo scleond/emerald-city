@@ -8,6 +8,7 @@ import {
   type ProjectObservationState,
 } from "./project-observation";
 import { observatoryDismissalContracts, type AttentionDismissalRecord } from "./dismissals";
+import { modelUsageAccessibilityLabel } from "./accessibility";
 
 export function AgentObservatoryPanel({
   theme,
@@ -87,8 +88,9 @@ export function AgentObservatoryPanel({
         gap: layout.compact ? 12 : 20,
       },
       card: {
-        flex: 1,
-        minWidth: 130,
+        flexGrow: 1,
+        flexBasis: layout.compact ? "100%" as unknown as number : "21%" as unknown as number,
+        minWidth: layout.compact ? "100%" as unknown as number : 130,
         padding: 14,
         borderWidth: 1,
         borderColor: theme.colors.foregroundMuted,
@@ -307,6 +309,8 @@ export function AgentObservatoryPanel({
       control: {
         color: theme.colors.foregroundMuted,
         fontSize: 12,
+        minHeight: 44,
+        paddingVertical: 14,
       },
     }),
     [layout.compact, theme],
@@ -322,7 +326,7 @@ export function AgentObservatoryPanel({
         </Pressable>
         {secondaryOpen ? <>
           <TextInput accessibilityLabel="Search workspaces or agents" placeholder="Search workspaces or agents" value={query} onChangeText={setQuery} style={{ color: theme.colors.foreground, borderWidth: 1, padding: 8 }} />
-          <View style={styles.toolbar}>{(["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(value => <Pressable key={value} onPress={() => setLifecycle(lifecycle === value ? undefined : value)}><Text style={styles.label}>{lifecycle === value ? `✓ ${value}` : value}</Text></Pressable>)}</View>
+          <View style={styles.toolbar}>{(["active", "waiting", "finished", "failed", "other"] as AgentLifecycle[]).map(value => <Pressable key={value} accessibilityRole="checkbox" accessibilityState={{ checked: lifecycle === value }} accessibilityLabel={`Filter agents by ${value}`} onPress={() => setLifecycle(lifecycle === value ? undefined : value)}><Text style={styles.label}>{lifecycle === value ? `✓ ${value}` : value}</Text></Pressable>)}</View>
         </> : null}
       </View>
       <StateContent state={state} styles={styles} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} attentionOpen={attentionOpen} toggleAttention={() => setAttentionOpen(!attentionOpen)} />
@@ -531,14 +535,14 @@ function ModelBar({ bar, maximum, styles }: { bar: ModelUsageBar; maximum: numbe
   const total = Math.max(bar.totalTokens, 1);
   return (
     <View
-      accessibilityLabel={`${bar.model}: ${bar.totalTokens} tokens, fresh input ${bar.freshInputTokens}, cached input ${bar.cachedInputTokens}, output ${bar.outputTokens}`}
+      accessibilityLabel={modelUsageAccessibilityLabel(bar)}
       style={styles.barRow}
     >
       <View style={styles.barHeader}>
          <Text style={styles.modelName}>{bar.model} · {bar.provider ?? "Provider unknown"} · {bar.costState === "unknown" ? "Cost unknown" : bar.costState === "partial" ? "Cost partial" : `$${bar.reportedCostUsd?.toFixed(4)}`}</Text>
         <Text style={styles.tokenTotal}>{bar.totalTokens.toLocaleString()} tokens</Text>
       </View>
-       <View style={[styles.barTrack, { width: `${(bar.totalTokens / maximum) * 100}%` }]}>
+       <View accessibilityLabel={`${bar.model} token composition: fresh input ${bar.freshInputTokens}, cached input ${bar.cachedInputTokens}, output ${bar.outputTokens}`} style={[styles.barTrack, { width: `${(bar.totalTokens / maximum) * 100}%` }]}>
         <View style={{ flex: (bar.freshInputTokens / total) || 0, ...styles.segmentFresh }} />
         <View style={{ flex: (bar.cachedInputTokens / total) || 0, ...styles.segmentCached }} />
         <View style={{ flex: (bar.outputTokens / total) || 0, ...styles.segmentOutput }} />
