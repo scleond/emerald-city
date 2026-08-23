@@ -9,8 +9,10 @@ import {
   type TelemetryDiagnostic,
 } from "./project-observation";
 import { observatoryDismissalContracts, type AttentionDismissalRecord } from "./dismissals";
-import { observatoryUsageContracts, type HistoricalUsageProjection, type UsageRange, type UsageTurnStore } from "./usage-turns";
+import { observatoryUsageContracts, type HistoricalUsageProjection, type UsageTurnStore } from "./usage-turns";
 import { lifecycleStyle, modelUsageAccessibilityLabel, observatoryLayout, selectedAgentMetadata, turnAccessibilityLabel, turnDisplayLabel, usageChartPalette } from "./accessibility";
+import { historySourceLabel, prepareSanitizedUsageExport, projectHistoryForRange, USAGE_RANGE_LABELS } from "./usage-history";
+import type { NormalizedUsageTurn, UsageRange } from "./usage-turns";
 
 export function AgentObservatoryPanel({
   theme,
@@ -63,6 +65,7 @@ export function AgentObservatoryPanel({
   const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(null);
   const [secondaryOpen, setSecondaryOpen] = React.useState(false);
   const [attentionOpen, setAttentionOpen] = React.useState(false);
+  const [historyRange, setHistoryRange] = React.useState<UsageRange>("24h");
   useEffect(() => { controller.setFilters(query, lifecycle ? [lifecycle] : []); }, [controller, query, lifecycle]);
   useEffect(() => {
     if (state.phase === "ready") {
@@ -382,7 +385,7 @@ export function AgentObservatoryPanel({
         <Text accessibilityRole="header" style={styles.title}>Agent Observatory</Text>
         <TextInput accessibilityLabel="Search workspaces or agents" placeholder="Search" value={query} onChangeText={setQuery} style={styles.searchInput} />
       </View>
-      <StateContent state={state} styles={styles} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} attentionOpen={attentionOpen} toggleAttention={() => setAttentionOpen(!attentionOpen)} />
+      <StateContent state={state} styles={styles} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={(id) => { setSelectedAgentId(id || null); if (id) void controller.loadTimeline(id); }} loadMore={(id) => void controller.loadTimeline(id, true)} onDismiss={(entry) => void controller.dismissAttention(entry)} attentionOpen={attentionOpen} toggleAttention={() => setAttentionOpen(!attentionOpen)} historyRange={historyRange} setHistoryRange={setHistoryRange} />
     </ScrollView>
   );
 }
@@ -507,7 +510,7 @@ function AttentionQueue({ attention, titles, styles, selectAgent, onDismiss, exp
   );
 }
 
-function StateContent({ state, styles, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, onDismiss, attentionOpen, toggleAttention }: { state: ProjectObservationState; styles: PanelStyles; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
+function StateContent({ state, styles, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, onDismiss, attentionOpen, toggleAttention, historyRange, setHistoryRange }: { state: ProjectObservationState; styles: PanelStyles; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void; historyRange: UsageRange; setHistoryRange: (range: UsageRange) => void }) {
   if (state.phase === "loading") {
     return <Text style={styles.subtitle}>Loading project agents…</Text>;
   }
@@ -527,18 +530,23 @@ function StateContent({ state, styles, lifecycle, setLifecycle, selectedAgentId,
       </View>
     );
   }
-  return <ReadyContent view={state.view} historicalUsage={state.historicalUsage} styles={styles} telemetry={state.telemetry} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} onDismiss={onDismiss} attentionOpen={attentionOpen} toggleAttention={toggleAttention} />;
+  return <ReadyContent view={state.view} historicalUsage={state.historicalUsage} styles={styles} telemetry={state.telemetry} lifecycle={lifecycle} setLifecycle={setLifecycle} selectedAgentId={selectedAgentId} selectAgent={selectAgent} loadMore={loadMore} timeline={state.timeline ?? {}} attention={state.attention} onDismiss={onDismiss} attentionOpen={attentionOpen} toggleAttention={toggleAttention} historyRange={historyRange} setHistoryRange={setHistoryRange} />;
 }
 
-function ReadyContent({ view, historicalUsage, styles, telemetry, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, timeline, attention, onDismiss, attentionOpen, toggleAttention }: { view: ObservatoryViewModel; historicalUsage?: Record<UsageRange, HistoricalUsageProjection>; styles: PanelStyles; telemetry?: TelemetryDiagnostic; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[]; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void }) {
+function ReadyContent({ view, historicalUsage, styles, telemetry, lifecycle, setLifecycle, selectedAgentId, selectAgent, loadMore, timeline, attention, onDismiss, attentionOpen, toggleAttention, historyRange, setHistoryRange }: { view: ObservatoryViewModel; historicalUsage?: Record<UsageRange, HistoricalUsageProjection>; styles: PanelStyles; telemetry?: TelemetryDiagnostic; lifecycle?: AgentLifecycle; setLifecycle: (value: AgentLifecycle | undefined) => void; selectedAgentId: string | null; selectAgent: (id: string) => void; loadMore: (id: string) => void; timeline: Record<string, { entries: { label: string; summary: string; at: string }[]; error?: string; hasOlder: boolean }>; attention: AttentionEntry[]; onDismiss: (entry: AttentionEntry) => void; attentionOpen: boolean; toggleAttention: () => void; historyRange: UsageRange; setHistoryRange: (range: UsageRange) => void }) {
   const agentCount = view.workspaces.reduce((total, workspace) => total + workspace.agents.length, 0);
   const titles = new Map(view.workspaces.flatMap((workspace) => workspace.agents.map((agent) => [agent.id, agent.title] as const)));
+  const historyTurns = view.workspaces.flatMap((workspace) => workspace.agents.flatMap((agent) => agent.usageTurns.filter((turn) => !turn.provisional && turn.observedAt).map((turn): NormalizedUsageTurn => ({ projectId: view.project.id, workspaceId: workspace.id, agentId: agent.id, turnId: turn.turnId ?? `${agent.id}-${turn.observedAt}`, observedAt: turn.observedAt!, startedAt: turn.startedAt ?? null, completedAt: turn.completedAt ?? null, model: turn.model ?? agent.model, inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens, outputTokens: turn.outputTokens, contextUsedTokens: turn.contextUsedTokens, contextMaxTokens: turn.contextMaxTokens, costUsd: turn.costUsd, costState: turn.costUsd === null ? "unknown" : "complete", confidence: "high" }))));
+  const history = projectHistoryForRange(historyTurns, historyRange, Date.now());
+  const [exported, setExported] = React.useState<string | null>(null);
   return (
     <>
        <Text style={styles.subtitle}>Project: {view.project.name}</Text>
        <Text style={styles.subtitle}>Project-wide token usage across active workspaces.</Text>
        <Text style={styles.label}>{view.workspaces.length} workspaces · {agentCount} agents</Text>
+       <View accessibilityLabel="Usage history controls" style={styles.secondary}><Text accessibilityRole="header" style={styles.sectionTitle}>Usage history</Text><Text style={styles.label}>{historySourceLabel(history)}</Text><Text style={styles.label}>Selected range: {USAGE_RANGE_LABELS[historyRange]} · {history.recordedTokens.toLocaleString()} recorded tokens</Text><View style={styles.toolbar}>{(Object.keys(USAGE_RANGE_LABELS) as UsageRange[]).map((range) => <Pressable key={range} accessibilityRole="radio" accessibilityState={{ selected: historyRange === range }} accessibilityLabel={`Show ${USAGE_RANGE_LABELS[range]} usage history`} onPress={() => setHistoryRange(range)} style={styles.touchTarget}><Text style={styles.label}>{historyRange === range ? `✓ ${USAGE_RANGE_LABELS[range]}` : USAGE_RANGE_LABELS[range]}</Text></Pressable>)}</View><Pressable accessibilityRole="button" accessibilityLabel="Export sanitized usage history" onPress={() => { const result = prepareSanitizedUsageExport(history.turns); setExported(result.data ?? result.error ?? "Export failed; try again."); }} style={styles.touchTarget}><Text style={styles.label}>Prepare sanitized history for copying</Text></Pressable>{exported ? <Text selectable accessibilityLabel={exported.startsWith("Export failed") ? "Sanitized export failed" : "Sanitized export data, selectable for copying"} style={styles.label}>{exported}</Text> : null}</View>
        <DashboardSummary dashboard={view.dashboard} historicalUsage={historicalUsage} styles={styles} />
+       <View accessibilityLabel="Usage history controls" style={styles.secondary}><Text accessibilityRole="header" style={styles.sectionTitle}>Usage history</Text><Text style={styles.label}>{historySourceLabel(history)}</Text><Text style={styles.label}>Selected range: {USAGE_RANGE_LABELS[historyRange]} · {history.recordedTokens.toLocaleString()} recorded tokens</Text><View style={styles.toolbar}>{(Object.keys(USAGE_RANGE_LABELS) as UsageRange[]).map((range) => <Pressable key={range} accessibilityRole="radio" accessibilityState={{ selected: historyRange === range }} accessibilityLabel={`Show ${USAGE_RANGE_LABELS[range]} usage history`} onPress={() => setHistoryRange(range)} style={styles.touchTarget}><Text style={styles.label}>{historyRange === range ? `✓ ${USAGE_RANGE_LABELS[range]}` : USAGE_RANGE_LABELS[range]}</Text></Pressable>)}</View><Pressable accessibilityRole="button" accessibilityLabel="Export sanitized usage history" onPress={() => { const result = prepareSanitizedUsageExport(history.turns); setExported(result.data ?? result.error ?? "Export failed; try again."); }} style={styles.touchTarget}><Text style={styles.label}>Prepare sanitized history for copying</Text></Pressable>{exported ? <Text selectable accessibilityLabel={exported.startsWith("Export failed") ? "Sanitized export failed" : "Sanitized export data, selectable for copying"} style={styles.label}>{exported}</Text> : null}</View>
       <View accessibilityLabel="Agent lifecycle summary" style={styles.summary}>
         {view.counts.map(({ label, count }) => (
           <View key={label} accessibilityLabel={`${label}: ${count}`}>
