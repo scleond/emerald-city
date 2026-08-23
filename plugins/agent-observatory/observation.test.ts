@@ -2,16 +2,24 @@ import { describe, expect, it } from "vitest";
 import {
   ATTENTION_INACTIVITY_THRESHOLD_MS,
   createProjectObservation,
+  finalizedTurnScale,
   deriveAttentionQueue,
   normalizeTimelineEntry,
   projectDashboard,
   reduceAgentUsage,
+  selectedAgentAfterProjection,
   type AttentionAgentInput,
   type NormalizedTimelineEntry,
   type ObservatoryAgentUsageTurn,
 } from "./observation";
 
 describe("projectDashboard", () => {
+  it("uses finalized turns for a stable chart scale and clears stale selection", () => {
+    const turn = (inputTokens: number, outputTokens: number, provisional = false) => ({ turnId: null, model: "m", inputTokens, cachedInputTokens: 0, outputTokens, costUsd: null, contextUsedTokens: null, contextMaxTokens: null, provisional });
+    expect(finalizedTurnScale([turn(4, 6), turn(100, 100, true)])).toBe(10);
+    expect(selectedAgentAfterProjection("gone", [{ id: "still-here" }])).toBeNull();
+    expect(selectedAgentAfterProjection("still-here", [{ id: "still-here" }])).toBe("still-here");
+  });
   it("keeps live usage out of finalized totals and reports cache and cost truthfully", () => {
     const base = { id: "a", workspaceId: "w", title: "A", status: "running", lifecycle: "active" as const, updatedAt: "", parentId: null, parentTitle: null, parentWorkspaceId: null, depth: 0, model: "gpt-4", switchedModels: false };
     let usage = reduceAgentUsage({ finalizedTurns: [], provisionalTurn: null }, { kind: "final", turnId: "1", model: "claude-3", usage: { inputTokens: 10, cachedInputTokens: 12, outputTokens: 5, totalCostUsd: 2 } });

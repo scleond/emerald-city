@@ -1,7 +1,7 @@
 import { type PluginWorkspacePanelProps, usePaseo, useRpc } from "@getpaseo/plugin";
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Pressable, ScrollView, Text, TextInput, View, type TextStyle, type ViewStyle } from "react-native";
-import { ATTENTION_REASON_LABELS, type AgentLifecycle, type AttentionEntry, type AttentionReasonKind, type ModelUsageBar, type ObservatoryAgentUsageTurn } from "./observation";
+import { ATTENTION_REASON_LABELS, finalizedTurnScale, selectedAgentAfterProjection, type AgentLifecycle, type AttentionEntry, type AttentionReasonKind, type ModelUsageBar, type ObservatoryAgentUsageTurn } from "./observation";
 import type { ObservatoryViewModel } from "./observation";
 import {
   ProjectObservationController,
@@ -48,6 +48,12 @@ export function AgentObservatoryPanel({
   const [lifecycle, setLifecycle] = React.useState<AgentLifecycle | undefined>();
   const [selectedAgentId, setSelectedAgentId] = React.useState<string | null>(null);
   useEffect(() => { controller.setFilters(query, lifecycle ? [lifecycle] : []); }, [controller, query, lifecycle]);
+  useEffect(() => {
+    if (state.phase === "ready") {
+      const next = selectedAgentAfterProjection(selectedAgentId, state.view.dashboard.agents);
+      if (next !== selectedAgentId) setSelectedAgentId(next);
+    }
+  }, [selectedAgentId, state]);
 
   useEffect(() => {
     void controller.start();
@@ -261,6 +267,28 @@ export function AgentObservatoryPanel({
         fontSize: 12,
         fontWeight: "600" as const,
       },
+      analysisRow: {
+        flexDirection: layout.compact ? "column" as const : "row" as const,
+        gap: layout.compact ? 12 : 18,
+      },
+      treePanel: {
+        flex: layout.compact ? undefined : 1,
+        flexBasis: layout.compact ? undefined : "33%" as unknown as number,
+        borderWidth: 1,
+        borderColor: theme.colors.foregroundMuted,
+        borderRadius: 10,
+        padding: 12,
+        gap: 4,
+      },
+      detailPanel: {
+        flex: layout.compact ? undefined : 2,
+        borderWidth: 1,
+        borderColor: theme.colors.foregroundMuted,
+        borderRadius: 10,
+        padding: 12,
+        gap: 4,
+        minHeight: 180,
+      },
     }),
     [layout.compact, theme],
   );
@@ -319,6 +347,9 @@ interface PanelStyles {
   detailLine: TextStyle;
   dismissButton: ViewStyle;
   dismissLabel: TextStyle;
+  analysisRow: ViewStyle;
+  treePanel: ViewStyle;
+  detailPanel: ViewStyle;
 }
 
 const ATTENTION_REASON_STYLES: Record<AttentionReasonKind, keyof PanelStyles> = {
@@ -407,47 +438,22 @@ function ReadyContent({ view, styles, selectedAgentId, selectAgent, loadMore, ti
       {agentCount === 0 ? (
         <Text style={styles.subtitle}>No agents are currently available in this project.</Text>
       ) : null}
-      {view.workspaces.map((workspace) => (
-        <View key={workspace.id} style={styles.workspace}>
-          <Text accessibilityRole="header" style={styles.workspaceTitle}>
-            {workspace.name}
-          </Text>
-          {workspace.agents.length === 0 ? (
-            <Text style={styles.subtitle}>No agents</Text>
-          ) : (
-            workspace.agents.map((agent) => {
-              const selected = agent.id === selectedAgentId;
-              return (
-                <Pressable
-                  onPress={() => selectAgent(selected ? "" : agent.id)}
-                  key={agent.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${agent.title}, status ${agent.status}`}
-                  style={selected ? styles.agentPressable : styles.row}
-                >
-                  <Text style={[styles.agentTitle, { marginLeft: agent.depth * 12 }]}>
-                    {agent.title} {agent.parentId ? `(↳ from ${agent.parentTitle ?? "unknown parent"})` : ""}
-                  </Text>
-                  <Text style={styles.status}>
-                    {agent.lifecycle === "other" ? `Other · ${agent.status}` : agent.status}
-                    {agent.model ? ` · ${agent.model}` : ""}
-                  </Text>
-                  {selected ? (
-                    <AgentUsageDetail
-                      workspaceName={workspace.name}
-                      model={agent.model}
-                      turns={agent.usageTurns}
-                      switchedModels={agent.switchedModels}
-                      styles={styles}
-                    />
-                  ) : null}
-                </Pressable>
-              );
-            })
-          )}
-        </View>
-      ))}
-      {selectedAgentId && timeline[selectedAgentId] ? <ActivityDetail timeline={timeline[selectedAgentId]} onLoadMore={() => loadMore(selectedAgentId)} styles={styles} /> : null}
+       <View accessibilityLabel="Delegation analysis" style={styles.analysisRow}>
+         <View accessibilityLabel="Delegation tree" style={styles.treePanel}>
+           <Text accessibilityRole="header" style={styles.sectionTitle}>Delegation tree</Text>
+           {view.dashboard.agents.length === 0 ? <Text style={styles.subtitle}>No agents</Text> : view.dashboard.agents.map((agent) => (
+             <Pressable key={agent.id} onPress={() => selectAgent(agent.id)} accessibilityRole="button" accessibilityLabel={`${agent.title}, ${agent.model ?? "model unknown"}, ${agent.usage.finalizedTurnCount} finalized turns, ${agent.lifecycle}, depth ${agent.depth}`} style={[styles.row, agent.id === selectedAgentId ? styles.agentPressable : undefined]}>
+               <Text style={[styles.agentTitle, { marginLeft: agent.depth * 12 }]}>{agent.title}</Text>
+               <Text style={styles.status}>{agent.model ?? "Model unknown"} · {agent.usage.recordedTokens.toLocaleString()} finalized tokens · {agent.lifecycle}</Text>
+             </Pressable>
+           ))}
+         </View>
+         <View accessibilityLabel="Selected agent usage" style={styles.detailPanel}>
+           <Text accessibilityRole="header" style={styles.sectionTitle}>Selected agent usage</Text>
+           {selectedAgentId ? (() => { const agent = view.dashboard.agents.find((item) => item.id === selectedAgentId); const workspace = view.workspaces.flatMap((item) => item.agents).find((item) => item.id === selectedAgentId); const maxTokens = finalizedTurnScale(workspace?.usageTurns ?? []); return agent && workspace ? <AgentUsageDetail workspaceName={agent.workspaceName} model={workspace.model} turns={workspace.usageTurns} switchedModels={workspace.switchedModels} styles={styles} maxTokens={maxTokens} /> : <Text style={styles.subtitle}>Select an agent.</Text>; })() : <Text style={styles.subtitle}>Select an agent.</Text>}
+           {selectedAgentId && timeline[selectedAgentId] ? <ActivityDetail timeline={timeline[selectedAgentId]} onLoadMore={() => loadMore(selectedAgentId)} styles={styles} /> : null}
+         </View>
+       </View>
     </>
   );
 }
@@ -518,11 +524,13 @@ function AgentUsageDetail({
   turns,
   switchedModels,
   styles,
+  maxTokens,
 }: {
   workspaceName: string;
   model: string | null;
   turns: ObservatoryAgentUsageTurn[];
   switchedModels: boolean;
+  maxTokens?: number;
   styles: PanelStyles;
 }) {
   const finalized = turns.filter((turn) => !turn.provisional);
@@ -536,11 +544,13 @@ function AgentUsageDetail({
         <Text style={styles.detailLine}>No reported turn usage.</Text>
       ) : null}
       {turns.length > 0 ? (
+        <ScrollView horizontal contentContainerStyle={{ minWidth: Math.max(280, (turns.length || 1) * 56) }} showsHorizontalScrollIndicator={true}>
         <View style={styles.turnRow} accessibilityLabel="Per-turn token usage">
           {turns.map((turn, index) => (
-            <TurnColumn key={`${turn.turnId ?? "unknown"}-${index}`} turn={turn} styles={styles} />
+            <TurnColumn key={`${turn.turnId ?? "unknown"}-${index}`} turn={turn} styles={styles} maxTokens={maxTokens} />
           ))}
         </View>
+        </ScrollView>
       ) : null}
       <Text style={styles.detailLine}>
         {finalized.some((turn) => turn.costUsd !== null)
@@ -562,12 +572,13 @@ function AgentUsageDetail({
   );
 }
 
-function TurnColumn({ turn, styles }: { turn: ObservatoryAgentUsageTurn; styles: PanelStyles }) {
+function TurnColumn({ turn, styles, maxTokens }: { turn: ObservatoryAgentUsageTurn; styles: PanelStyles; maxTokens?: number }) {
   const input = turn.inputTokens ?? 0;
   const cached = Math.min(turn.cachedInputTokens ?? 0, input);
   const fresh = Math.max(0, input - cached);
   const output = turn.outputTokens ?? 0;
   const total = Math.max(input + output, 1);
+  const scale = Math.max(maxTokens ?? total, 1);
   return (
     <View
       style={styles.turnColumn}
@@ -576,7 +587,7 @@ function TurnColumn({ turn, styles }: { turn: ObservatoryAgentUsageTurn; styles:
         `${input + output} tokens`
       }
     >
-      <View style={styles.turnStack}>
+       <View style={[styles.turnStack, { height: Math.max(24, Math.round((total / scale) * 120)) }]}>
         <View style={{ flex: (fresh / total) || 0, ...styles.segmentFresh }} />
         <View style={{ flex: (cached / total) || 0, ...styles.segmentCached }} />
         <View style={{ flex: (output / total) || 0, ...styles.segmentOutput }} />

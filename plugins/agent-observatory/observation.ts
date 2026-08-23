@@ -82,6 +82,14 @@ export function agentUsageTurns(record: AgentUsageRecord): ObservatoryAgentUsage
     : [...record.finalizedTurns];
 }
 
+export function finalizedTurnScale(turns: readonly ObservatoryAgentUsageTurn[]): number {
+  return Math.max(...turns.filter((turn) => !turn.provisional).map((turn) => (turn.inputTokens ?? 0) + (turn.outputTokens ?? 0)), 1);
+}
+
+export function selectedAgentAfterProjection(selectedAgentId: string | null, agents: readonly { id: string }[]): string | null {
+  return selectedAgentId && agents.some((agent) => agent.id === selectedAgentId) ? selectedAgentId : null;
+}
+
 export interface ModelUsageBar {
   model: string;
   provider: string | null;
