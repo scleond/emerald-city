@@ -8,7 +8,7 @@ export function projectHistoryForRange(turns: readonly NormalizedUsageTurn[], ra
 
 /** Export only the stable, normalized usage contract. Never serialize event payloads. */
 export function sanitizedUsageExport(turns: readonly NormalizedUsageTurn[]): string {
-  return JSON.stringify({ version: 1, turns: turns.map(({ projectId, workspaceId, agentId, turnId, observedAt, startedAt, completedAt, model, inputTokens, cachedInputTokens, outputTokens, contextUsedTokens, contextMaxTokens, costUsd, costState, confidence }) => ({ projectId, workspaceId, agentId, turnId, observedAt, startedAt, completedAt, model, inputTokens, cachedInputTokens, outputTokens, contextUsedTokens, contextMaxTokens, costUsd, costState, confidence })) });
+  return JSON.stringify({ version: 1, turns: turns.map(({ projectId, workspaceId, agentId, turnId, observedAt, startedAt, completedAt, model, canonicalModelId, provider, displayName, inputTokens, cachedInputTokens, outputTokens, contextUsedTokens, contextMaxTokens, costUsd, costState, confidence }) => ({ projectId, workspaceId, agentId, turnId, observedAt, startedAt, completedAt, model, canonicalModelId, provider, displayName, inputTokens, cachedInputTokens, outputTokens, contextUsedTokens, contextMaxTokens, costUsd, costState, confidence })) });
 }
 
 export function prepareSanitizedUsageExport(turns: readonly NormalizedUsageTurn[]): { data?: string; error?: string } {

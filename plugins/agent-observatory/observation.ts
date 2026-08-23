@@ -13,8 +13,8 @@ export interface ObservatoryUsageFields {
 }
 
 export type AgentUsageEvent =
-  | { kind: "provisional"; turnId?: string; model?: string | null; usage?: ObservatoryUsageFields; observedAt?: string }
-  | { kind: "final"; turnId?: string; model?: string | null; usage?: ObservatoryUsageFields; observedAt?: string };
+  | { kind: "provisional"; turnId?: string; model?: string | null; canonicalModelId?: string | null; provider?: string | null; displayName?: string | null; usage?: ObservatoryUsageFields; observedAt?: string }
+  | { kind: "final"; turnId?: string; model?: string | null; canonicalModelId?: string | null; provider?: string | null; displayName?: string | null; usage?: ObservatoryUsageFields; observedAt?: string };
 
 export interface ObservatoryAgentUsageTurn {
   turnId: string | null;
@@ -43,14 +43,14 @@ export function hasUsableUsage(usage: unknown): usage is ObservatoryUsageFields 
   return typeof usage === "object" && usage !== null && !Array.isArray(usage) && Object.entries(usage).some(([key, value]) => supportedUsageFields.has(key) && typeof value === "number" && Number.isFinite(value));
 }
 
-export function normalizeUsageEvent(input: { type?: unknown; kind?: unknown; turnId?: unknown; model?: unknown; usage?: unknown; timestamp?: unknown; observedAt?: unknown }): AgentUsageEvent | null {
+export function normalizeUsageEvent(input: { type?: unknown; kind?: unknown; turnId?: unknown; model?: unknown; canonicalModelId?: unknown; provider?: unknown; displayName?: unknown; usage?: unknown; timestamp?: unknown; observedAt?: unknown }): AgentUsageEvent | null {
   const type = input.type ?? input.kind;
   if (type !== "usage_updated" && type !== "turn_completed") return null;
   if (!hasUsableUsage(input.usage)) return null;
   const usage = Object.fromEntries(Object.entries(input.usage).filter(([key, value]) => supportedUsageFields.has(key) && typeof value === "number" && Number.isFinite(value))) as ObservatoryUsageFields;
   if (!hasUsableUsage(usage)) return null;
   const observedAt = input.timestamp ?? input.observedAt;
-  return { kind: type === "turn_completed" ? "final" : "provisional", turnId: typeof input.turnId === "string" ? input.turnId : undefined, model: typeof input.model === "string" ? input.model : undefined, usage, observedAt: typeof observedAt === "string" ? observedAt : undefined };
+  return { kind: type === "turn_completed" ? "final" : "provisional", turnId: typeof input.turnId === "string" ? input.turnId : undefined, model: typeof input.model === "string" ? input.model : undefined, canonicalModelId: typeof input.canonicalModelId === "string" ? input.canonicalModelId : undefined, provider: typeof input.provider === "string" ? input.provider : undefined, displayName: typeof input.displayName === "string" ? input.displayName : undefined, usage, observedAt: typeof observedAt === "string" ? observedAt : undefined };
 }
 
 export function emptyAgentUsage(): AgentUsageRecord {

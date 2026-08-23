@@ -138,6 +138,17 @@ describe("usage turn store", () => {
     expect(result.workspaces.map(({ key, reportedCostUsd }) => [key, reportedCostUsd])).toEqual([["workspace-b", 1], ["workspace-a", 2]]);
   });
 
+  it("separates conflicting model metadata and honors explicit unknown cost state", () => {
+    const result = projectHistoricalUsage([
+      turn({ turnId: "a", canonicalModelId: "model-1", provider: "A", displayName: "One", costUsd: 1, costState: "unknown" }),
+      turn({ turnId: "b", canonicalModelId: "model-1", provider: "B", displayName: "Two", costUsd: 2 }),
+    ], "30d", Date.parse("2026-01-11T00:00:00.000Z"));
+    expect(result.models).toHaveLength(2);
+    expect(result.models.map(({ canonicalModelId }) => canonicalModelId)).toEqual(["model-1", "model-1"]);
+    expect(result.models[0]?.costState).toBe("estimated");
+    expect(result.costState).toBe("estimated");
+  });
+
   it("round trips and replaces by full scope and turn identity", async () => {
     const first = storage();
     const store = createUsageTurnStore({ storage: first, now: () => Date.parse("2026-01-11T00:00:00.000Z") });

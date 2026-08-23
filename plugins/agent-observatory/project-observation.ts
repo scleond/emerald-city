@@ -536,6 +536,7 @@ export class ProjectObservationController {
       turnId: event.turnId ?? persistenceId ?? fallbackUsageIdentity(event.model ?? fallbackModel, usage),
       observedAt, startedAt: null, completedAt: event.kind === "final" ? observedAt : null,
       model: event.model ?? fallbackModel, inputTokens: usage.inputTokens ?? null, cachedInputTokens: usage.cachedInputTokens ?? null,
+      canonicalModelId: event.canonicalModelId ?? event.model ?? fallbackModel, provider: event.provider ?? null, displayName: event.displayName ?? event.model ?? fallbackModel,
       outputTokens: usage.outputTokens ?? null, contextUsedTokens: usage.contextWindowUsedTokens ?? null, contextMaxTokens: usage.contextWindowMaxTokens ?? null,
       costUsd: usage.totalCostUsd ?? null, costState: usage.totalCostUsd === undefined ? "unknown" : "complete", confidence: event.kind === "final" ? "high" : "low",
     };
