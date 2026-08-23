@@ -411,7 +411,7 @@ export class ProjectObservationController {
     this.telemetry = {
       type: event.type,
       turnId: event.turnId ?? null,
-      usagePresent: event.usage !== undefined,
+      usagePresent: hasUsableUsage(event.usage),
       usageFields: event.usage ? Object.keys(event.usage).sort() : [],
       eventFields: Object.keys(event).filter((key) => key !== "usage").sort(),
       health: event.type === "turn_completed" && hasUsableUsage(event.usage) ? "reported" : event.type === "usage_updated" && hasUsableUsage(event.usage) ? "pending" : "not-reported",
@@ -457,17 +457,17 @@ export class ProjectObservationController {
     if (event.kind === "provisional") {
       const key = fallbackUsageIdentity(event.model ?? model, event.usage);
       const queue = identities.get(key) ?? [];
-      const identity = `${key}:${queue.length}`;
+      const identity = queue.find((candidate) => candidate.endsWith(`:${event.observedAt ?? ""}`)) ?? `${key}:${event.observedAt ?? ""}`;
+      if (queue.includes(identity)) return identity;
       queue.push(identity);
       identities.set(key, queue);
       return identity;
     }
     const key = fallbackUsageIdentity(event.model ?? model, event.usage);
     const matching = identities.get(key);
-    const queue = matching && matching.length > 0 ? matching : [...identities.values()].find((items) => items.length > 0);
-    const identity = queue?.shift();
+    const identity = matching?.shift();
     if (matching && matching.length === 0) identities.delete(key);
-    return identity ?? `final:${key}`;
+    return identity ?? `final:${fallbackUsageIdentity(event.model ?? model, event.usage, event.observedAt ?? "")}`;
   }
 
   private async persistUsage(agentId: string, event: AgentUsageEvent, fallbackModel: string | null, persistenceId?: string, observedAt = new Date(this.now()).toISOString()): Promise<void> {

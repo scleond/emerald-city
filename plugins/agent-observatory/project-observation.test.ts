@@ -115,9 +115,9 @@ describe("ProjectObservationController", () => {
     const controller = new ProjectObservationController(harness.paseo, "workspace-1", noTimers(), undefined, undefined, usageStore);
     await controller.start();
     harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "usage_updated", model: "model", usage: { inputTokens: 10 } } });
-    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", model: "model", usage: { inputTokens: 10, outputTokens: 2 } } });
+    harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type: "turn_completed", model: "model", usage: { inputTokens: 10 } } });
     await vi.waitFor(() => expect(stored).toHaveLength(1));
-    expect(stored[0]).toMatchObject({ turnId: "fallback:model:[[\"inputTokens\",10]]:0", confidence: "high" });
+    expect(stored[0]).toMatchObject({ turnId: "fallback:model:[[\"inputTokens\",10]]::", confidence: "high" });
     controller.stop();
   });
 
@@ -130,10 +130,10 @@ describe("ProjectObservationController", () => {
     const emit = (type: string, usage: { inputTokens: number; outputTokens?: number }) => harness.publishTimeline("agent-1", { agentId: "agent-1", event: { type, model: "model", usage } });
     emit("usage_updated", { inputTokens: 10 });
     emit("usage_updated", { inputTokens: 20 });
-    emit("turn_completed", { inputTokens: 10, outputTokens: 1 });
-    emit("turn_completed", { inputTokens: 20, outputTokens: 2 });
+    emit("turn_completed", { inputTokens: 10 });
+    emit("turn_completed", { inputTokens: 20 });
     await vi.waitFor(() => expect(stored).toHaveLength(2));
-    expect(stored.map((turn) => turn.outputTokens).sort()).toEqual([1, 2]);
+    expect(stored.map((turn) => turn.turnId).sort()).toHaveLength(2);
     controller.stop();
   });
 

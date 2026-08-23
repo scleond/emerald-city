@@ -74,9 +74,9 @@ function toUsageTurn(
 }
 
 /** Lower-confidence identity for events without a provider turn ID; usage is part of the key. */
-export function fallbackUsageIdentity(model: string | null | undefined, usage: ObservatoryUsageFields | null | undefined = undefined): string {
+export function fallbackUsageIdentity(model: string | null | undefined, usage: ObservatoryUsageFields | null | undefined = undefined, source = ""): string {
   const normalized = Object.entries(usage ?? {}).filter(([, value]) => typeof value === "number" && Number.isFinite(value)).sort(([a], [b]) => a.localeCompare(b));
-  return `fallback:${model ?? "unknown"}:${JSON.stringify(normalized)}`;
+  return `fallback:${model ?? "unknown"}:${JSON.stringify(normalized)}:${source}`;
 }
 
 export function usageIdentity(turn: ObservatoryAgentUsageTurn): string {
