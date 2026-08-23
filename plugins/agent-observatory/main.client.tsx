@@ -580,7 +580,7 @@ function ReadyContent({ view, historicalUsage, styles, telemetry, lifecycle, set
       </View>
        <AttentionQueue attention={attention} titles={titles} styles={styles} selectAgent={selectAgent} onDismiss={onDismiss} expanded={attentionOpen} onToggle={toggleAttention} />
        <ModelUsagePanel models={view.models} styles={styles} />
-       <Text style={styles.label}>Telemetry: {telemetry ? `${telemetry.type} · usage ${telemetry.usagePresent ? "received" : "not reported"} · fields: ${telemetry.usageFields.join(", ") || "none"}` : "waiting for an agent event"}</Text>
+       <Text style={styles.label}>Telemetry: {telemetry ? `${telemetry.health} · ${telemetry.type} · fields: ${telemetry.usageFields.join(", ") || "none"}` : "not-reported · waiting for an agent event"}</Text>
       <Text accessibilityRole="header" style={styles.sectionTitle}>
         Workspaces
       </Text>

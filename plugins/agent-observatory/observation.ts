@@ -36,6 +36,12 @@ export interface AgentUsageRecord {
   provisionalTurn: ObservatoryAgentUsageTurn | null;
 }
 
+export function normalizeUsageEvent(input: { type?: string; kind?: string; turnId?: unknown; model?: unknown; usage?: ObservatoryUsageFields | null; timestamp?: string; observedAt?: string }): AgentUsageEvent | null {
+  const type = input.type ?? input.kind;
+  if (type !== "usage_updated" && type !== "turn_completed") return null;
+  return { kind: type === "turn_completed" ? "final" : "provisional", turnId: typeof input.turnId === "string" ? input.turnId : undefined, model: typeof input.model === "string" ? input.model : undefined, usage: input.usage ?? undefined, observedAt: input.timestamp ?? input.observedAt };
+}
+
 export function emptyAgentUsage(): AgentUsageRecord {
   return { finalizedTurns: [], provisionalTurn: null };
 }

@@ -5,6 +5,7 @@ import {
   type AttentionEntry,
   emptyAgentUsage,
   reduceAgentUsage,
+  normalizeUsageEvent,
   type AgentUsageEvent,
   type AgentUsageRecord,
   type ObservatoryAgentSnapshot,
@@ -55,7 +56,8 @@ interface TimerApi {
 
 const refreshIntervalMs = 15_000;
 export interface TimelineState { entries: NormalizedTimelineEntry[]; cursor?: { epoch: string; seq: number }; hasOlder: boolean; loading: boolean; error?: string }
-export interface TelemetryDiagnostic { type: string; turnId: string | null; usagePresent: boolean; usageFields: string[]; eventFields: string[] }
+export type TelemetryHealth = "reported" | "pending" | "not-reported";
+export interface TelemetryDiagnostic { type: string; turnId: string | null; usagePresent: boolean; usageFields: string[]; eventFields: string[]; health: TelemetryHealth }
 
 export class ProjectObservationController {
   private state: ProjectObservationState = { phase: "loading" };
@@ -407,9 +409,10 @@ export class ProjectObservationController {
       usagePresent: event.usage !== undefined,
       usageFields: event.usage ? Object.keys(event.usage).sort() : [],
       eventFields: Object.keys(event).filter((key) => key !== "usage").sort(),
+      health: event.type === "turn_completed" ? "reported" : event.type === "usage_updated" ? "pending" : "not-reported",
     };
     const model = this.agentModels.get(payload.agentId) ?? null;
-    const usageEvent = toUsageEvent(event);
+    const usageEvent = normalizeUsageEvent(event);
     if (event.type === "model_changed") {
       const nextModel = event.runtimeInfo?.model ?? null;
       if (nextModel !== null) this.agentModels.set(payload.agentId, nextModel);
@@ -430,13 +433,8 @@ export class ProjectObservationController {
       const type = String(item.type ?? item.kind ?? "");
       const usage = item.usage && typeof item.usage === "object" ? item.usage as ObservatoryUsageFields : undefined;
       if (!usage || !["usage_updated", "turn_completed"].includes(type)) continue;
-      const event: AgentUsageEvent = {
-        kind: type === "turn_completed" ? "final" : "provisional",
-        turnId: typeof item.turnId === "string" ? item.turnId : undefined,
-        model: typeof item.model === "string" ? item.model : undefined,
-        usage,
-        observedAt: entry.timestamp,
-      };
+      const event = normalizeUsageEvent({ type, turnId: item.turnId, model: item.model, usage, timestamp: entry.timestamp });
+      if (!event) continue;
       this.usage.set(agentId, reduceAgentUsage(this.usage.get(agentId) ?? emptyAgentUsage(), event, this.agentModels.get(agentId) ?? null));
       void this.persistUsage(agentId, event, event.model ?? this.agentModels.get(agentId) ?? null, entry.timestamp);
     }
@@ -527,16 +525,6 @@ function toAgent(agent: PaseoAgent): ObservatoryAgentSnapshot {
     model: agent.model ?? null,
     labels: agent.labels,
   };
-}
-
-function toUsageEvent(event: ObservatoryAgentStreamEvent): AgentUsageEvent | null {
-  if (event.type === "usage_updated") {
-    return { kind: "provisional", turnId: event.turnId, usage: event.usage };
-  }
-  if (event.type === "turn_completed") {
-    return { kind: "final", turnId: event.turnId, usage: event.usage };
-  }
-  return null;
 }
 
 
