@@ -1,23 +1,9 @@
-import { z } from "zod";
-import { defineAttachmentSource, defineRpc, PluginAttachmentSearchPayloadSchema, type PluginHandlerContext } from "@getpaseo/plugin/server";
+import type { output as ZodOutput } from "zod";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
+import { repositoryContextSearch } from "./repository-context.shared";
 import { diffEvidenceText, gitDiffEvidence, repositoryItem, searchRepository, snapshotText } from "./repository-snapshots.server";
 
-export const repositoryContextSearch = defineRpc({
-  name: "repository-context.search",
-  input: z.object({ query: z.string().default(""), workspaceId: z.string().optional(), repositoryPath: z.string().optional() }),
-  output: PluginAttachmentSearchPayloadSchema,
-});
-
-export const repositoryContextSource = defineAttachmentSource({
-  id: "repository-context",
-  title: "Repository context",
-  icon: "FileSearch",
-  pickerTitle: "Add repository context",
-  searchPlaceholder: "Search files by path or title",
-  search: repositoryContextSearch,
-});
-
-export async function searchRepositoryContext(input: z.output<typeof repositoryContextSearch.input>, paseo: PluginHandlerContext["paseo"]) {
+export async function searchRepositoryContext(input: ZodOutput<typeof repositoryContextSearch.input>, paseo: PluginHandlerContext["paseo"]) {
   const entries = (await paseo.workspaces.list()).entries;
   let repositoryPath = input.repositoryPath;
   if (input.workspaceId) repositoryPath = entries.find((entry) => entry.id === input.workspaceId)?.workspaceDirectory;
