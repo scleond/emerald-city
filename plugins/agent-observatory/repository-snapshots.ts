@@ -8,6 +8,7 @@ export const SNAPSHOT_LIMIT = 32_000;
 export const SNAPSHOT_LINE_LIMIT = 400;
 export const DIFF_LIMIT = 32_000;
 const EXCLUSION_LIMIT = 100;
+const BINARY_PREFIX_LIMIT = 8 * 1024;
 const DOCUMENT_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst", ".adoc", ".json", ".yaml", ".yml", ".toml", ".ts", ".tsx", ".js", ".jsx", ".css", ".scss", ".html", ".xml", ".csv"]);
 const EXCLUDED_PARTS = new Set([".git", "node_modules", ".env", ".venv", "dist", "build", "generated", "coverage"]);
 const SECRET_NAME = /(^|[._-])(secret|secrets|credential|credentials|token|passwords?|passwd|apikey|api-key)([._-]|$)/i;
@@ -139,6 +140,27 @@ export function snapshotText(snapshot: RepositorySnapshot) {
   return renderAttachment([`# ${snapshot.title}`, `Source: ${snapshot.source} file ${snapshot.path}`, `Generated: ${snapshot.generatedAt}`], snapshot.content, snapshot.truncated);
 }
 
+async function binaryFilePrefix(filePath: string): Promise<boolean> {
+  const handle = await fs.open(filePath, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(BINARY_PREFIX_LIMIT);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).includes(0);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function binaryGitPrefix(repositoryPath: string, filePath: string): Promise<boolean> {
+  try {
+    const result = await execFileAsync("git", ["-C", repositoryPath, "show", `HEAD:${filePath}`], { encoding: "buffer", maxBuffer: BINARY_PREFIX_LIMIT });
+    return Buffer.from(result.stdout).includes(0);
+  } catch (error) {
+    const partial = (error as { stdout?: Buffer | string }).stdout;
+    return partial !== undefined && Buffer.from(partial).includes(0);
+  }
+}
+
 export function diffEvidenceText(evidence: RepositoryDiffEvidence) {
   let exclusions = "None";
   if (evidence.excluded.length > 0) {
@@ -178,10 +200,15 @@ export async function gitDiffEvidence(repositoryPath: string, generatedAt = new 
   }
   for (const filePath of endpointPaths) {
     if (binaryPaths.has(filePath)) continue;
+    const candidate = path.resolve(root, filePath);
     try {
-      const content = await fs.readFile(path.resolve(root, filePath)); if (content.includes(0)) binaryPaths.add(filePath);
+      const target = await fs.realpath(candidate);
+      const relative = path.relative(root, target);
+      // Do not open or read a symlink target until containment has been proven.
+      if (relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
+      if (await binaryFilePrefix(target)) binaryPaths.add(filePath);
     } catch {
-      try { const result = await execFileAsync("git", ["-C", repositoryPath, "show", `HEAD:${filePath}`], { encoding: "buffer", maxBuffer: 256 * 1024 }); if (Buffer.from(result.stdout).includes(0)) binaryPaths.add(filePath); } catch { /* path may be newly added */ }
+      if (await binaryGitPrefix(repositoryPath, filePath)) binaryPaths.add(filePath);
     }
   }
   const renameExclusions = new Map<string, string>();

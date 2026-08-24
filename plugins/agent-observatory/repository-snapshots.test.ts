@@ -177,6 +177,16 @@ describe("repository snapshots", () => {
     expect(evidence.excluded).toEqual(expect.arrayContaining([{ path: "changed.md", reason: "binary file content" }, { path: "deleted.json", reason: "binary file content" }]));
   });
 
+  it("detects binary content in a large changed file from a bounded prefix", async () => {
+    const directory = await repository();
+    await fs.writeFile(path.join(directory, "large.md"), Buffer.concat([Buffer.from([0]), Buffer.alloc(2_000_000, 65)]));
+    execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]);
+    await fs.writeFile(path.join(directory, "large.md"), Buffer.concat([Buffer.from([0]), Buffer.alloc(2_000_000, 66)]));
+    const evidence = await gitDiffEvidence(directory);
+    expect(evidence.content).not.toContain("large.md");
+    expect(evidence.excluded).toContainEqual({ path: "large.md", reason: "binary file content" });
+  });
+
   it("does not turn non-buffer subprocess errors into evidence", async () => {
     const directory = await repository(); await fs.writeFile(path.join(directory, "README.md"), "content\n"); execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]);
     await expect(gitDiffEvidence(path.join(directory, "missing-repository"))).rejects.toBeTruthy();
