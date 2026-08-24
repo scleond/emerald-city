@@ -167,6 +167,32 @@ fresh review only when `MODEL-SELECTION.md` classifies the change as material.
 
 ## Orchestration
 
+### Ownership and safe degradation
+
+The top-level coordinator owns permission handling and all parent/sibling
+orchestration controls. Child implementers and independent reviewers are
+scoped to their assigned work or fixed-point diff: they surface permission
+needs, but cannot approve permissions, call `respond_to_permission`,
+create/resume/archive another agent, push, close an issue, or clean parent
+resources. The coordinator handles each request ID once and may perform at
+most one persisted status reconciliation when its observed state is
+inconsistent.
+
+Recursive or superseding permission requests latch `degraded` and
+`noNewAgents` immediately. No subsequent writer, reviewer, or retry launch is
+allowed; one bounded recovery prompt to an existing writer remains allowed.
+After the latch, preserve the accepted commit, worktree, review evidence, and
+retry state before reporting. Inspection and verification remain safe in
+degraded mode, but an unmet independent-review gate remains false and cannot
+be recorded as approved. Push, completion comment, issue closure, and
+completed-resource cleanup are coordinator-owned loop operations attempted
+directly by the coordinator; only the host approval surface prompts the user.
+Record attempted and observed remote mutation states separately so restart
+cannot duplicate an observed effect. Record coordinator-owned resources with
+`resource:<agent-or-workspace-id>:active|archived`; degraded mode rejects new
+active resources, and cleanup observation requires preservation plus zero
+active issue-owned resources.
+
 Resolve the adapter **per run** through a three-level merge, most-specific wins.
 Do this before inspecting or launching agents.
 

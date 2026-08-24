@@ -13,9 +13,11 @@ the corresponding long-option spelling):
 PowerShell: boss-run-state.ps1 init -Issue N -Base COMMIT -Workspace ID
 Bash:       boss-run-state.sh init --issue N --base COMMIT --workspace ID
 Both:       get; transition; record; consume; permission; reconcile; outcome
-record:     -Kind/--kind verification|review|preservation|fixedPoint|remote
-            -Value/--value passed|approved|commit:<id>|pushed|closed
-permission: -PermissionId/--permission-id ID
+record:     -Kind/--kind verification|review|preservation|fixedPoint|remote|resource
+            -Value/--value passed|approved|commit:<id>|<mutation>-attempted|<mutation>-observed
+permission: -PermissionId/--permission-id ID [-PermissionMode/--permission-mode normal|recursive|superseding]
+reconcile:  -PermissionId/--permission-id ID -Value/--value permission-status
+resource:   -Value/--value agent|workspace:<opaque-id>:active|archived
 ```
 
 The lifecycle phases are `selected`, `implementing`, `verifying`, `reviewing`,
@@ -26,7 +28,13 @@ outcome return the current state without changing the lifecycle. Conflicting
 identities, invalid transitions, missing verification/review/preservation,
 duplicate ownership, conflicting accepted bases, exhausted budgets, repeated
 permission identifiers, and terminal-state mutation return a non-zero status
-with a JSON error on stderr. Permission identifiers and commit values are
+with a JSON error on stderr. Recursive or superseding permission requests latch
+`degraded` and `noNewAgents` immediately; later preservation and evidence
+recording remain allowed. No later agent launch is permitted. Recovery prompts
+remain allowed as bounded actions against an existing writer. A permission ID
+has at most one status reconciliation. Resource records persist active
+issue-owned agent/workspace IDs and require zero active IDs for cleanup
+observation. Permission identifiers, resource IDs, and commit values are
 opaque, bounded safe identifiers; only normalized IDs are persisted.
 
 `record fixedPoint -Value commit:<id>` stores the verified fixed-point commit
@@ -39,12 +47,14 @@ next issue; an active or incomplete ledger retains ownership.
 The normalized state object is:
 
 ```json
-{"schemaVersion":1,"issue":68,"workspace":"wks_…","acceptedBase":"cef0eb4",
+{"schemaVersion":2,"issue":68,"workspace":"wks_…","acceptedBase":"cef0eb4",
  "phase":"selected","outcome":null,"revision":0,
  "budgets":{"recoveryPrompts":0,"writerLaunches":0,"reviewRounds":0,"reviewerReplacements":0},
  "verified":false,"reviewed":false,"preserved":false,"preservedCommit":null,
  "fixedPointCommit":null,"preservationEvidence":null,"observations":[],
- "permissionAttempts":0,"handledPermissionIds":[]}
+ "permissionAttempts":0,"handledPermissionIds":[],"permissionReconciliationIds":[],
+ "remoteStates":[],"activeResources":[],"resourceEvents":[],
+ "degraded":false,"noNewAgents":false}
 ```
 
 Only opaque identifiers and boolean/result facts belong in state. Credentials,

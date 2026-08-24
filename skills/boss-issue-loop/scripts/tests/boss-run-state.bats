@@ -22,3 +22,38 @@ state(){ python -c "import json;print(json.load(open('$BOSS_ISSUE_LOOP_STATE_PAT
  "$S" init --issue 68 --base base --workspace ws >/dev/null; "$S" transition --phase implementing >/dev/null; "$S" transition --phase verifying >/dev/null; "$S" record --kind verification --value passed >/dev/null; "$S" transition --phase reviewing >/dev/null; "$S" record --kind review --value approved >/dev/null; "$S" record --kind preservation --value commit:abc123 >/dev/null; "$S" transition --phase integrating >/dev/null; "$S" transition --phase pushed >/dev/null; "$S" transition --phase closed >/dev/null; "$S" transition --phase cleaned >/dev/null; "$S" outcome --status complete >/dev/null
  "$S" init --issue 69 --base nextbase --workspace ws >/dev/null; [ "$(state "['issue']")" = 69 ]; test "$(find "$(dirname "$BOSS_ISSUE_LOOP_STATE_PATH")/history" -name '*.json' | wc -l)" -eq 1
 }
+@test "recursive permission degrades once and prevents subsequent launches" {
+ "$S" init --issue 69 --base base --workspace ws >/dev/null
+ "$S" permission --permission-id req-recursive --permission-mode recursive >/dev/null
+ [ "$(state "['outcome']")" = degraded ]; [ "$(state "['noNewAgents']")" = True ]; [ "$(state "['permissionAttempts']")" = 1 ]
+ run "$S" consume --budget writerLaunches; [ "$status" -ne 0 ]; run "$S" consume --budget reviewRounds; [ "$status" -ne 0 ]
+ run "$S" permission --permission-id req-recursive --permission-mode recursive; [ "$status" -ne 0 ]
+ "$S" reconcile --permission-id req-recursive --value permission-status >/dev/null; rev="$(state "['revision']")"; "$S" reconcile --permission-id req-recursive --value permission-status >/dev/null; [ "$(state "['revision']")" = "$rev" ]
+}
+@test "remote attempts and observations are distinct and replay-safe" {
+ "$S" init --issue 69 --base base --workspace ws >/dev/null
+ "$S" record --kind remote --value push-attempted >/dev/null; rev="$(state "['revision']")"; "$S" record --kind remote --value push-attempted >/dev/null; [ "$(state "['revision']")" = "$rev" ]
+ "$S" record --kind remote --value push-observed >/dev/null; "$S" record --kind remote --value comment-attempted >/dev/null; "$S" record --kind remote --value comment-observed >/dev/null; "$S" record --kind remote --value cleanup-attempted >/dev/null; "$S" record --kind remote --value cleanup-observed >/dev/null; [ "$(state "['remoteStates']" | wc -l)" -ge 1 ]
+}
+@test "fresh low-risk path permits bounded writer and reviewer launches" {
+ "$S" init --issue 69 --base base --workspace ws >/dev/null; "$S" consume --budget writerLaunches >/dev/null; "$S" consume --budget reviewRounds >/dev/null
+ [ "$(state "['budgets']['writerLaunches']")" = 1 ]; [ "$(state "['budgets']['reviewRounds']")" = 1 ]; [ "$(state "['noNewAgents']")" = False ]
+}
+@test "terminal outcomes reject permission mutation without revision changes" {
+ "$S" init --issue 69 --base base --workspace ws >/dev/null; "$S" outcome --status blocked >/dev/null; rev="$(state "['revision']")"
+ run "$S" permission --permission-id after-blocked; [ "$status" -ne 0 ]; run "$S" permission --permission-id recursive-after-blocked --permission-mode recursive; [ "$status" -ne 0 ]; [ "$(state "['revision']")" = "$rev" ]; [ "$(state "['outcome']")" = blocked ]
+}
+@test "degraded mode preserves recovery prompt but blocks review approval, launches, remote work, and new resources" {
+ "$S" init --issue 69 --base base --workspace ws >/dev/null; "$S" permission --permission-id superseding-one --permission-mode superseding >/dev/null
+ run "$S" record --kind review --value approved; [ "$status" -ne 0 ]; "$S" consume --budget recoveryPrompts >/dev/null
+ run "$S" consume --budget writerLaunches; [ "$status" -ne 0 ]; run "$S" consume --budget reviewRounds; [ "$status" -ne 0 ]; run "$S" consume --budget reviewerReplacements; [ "$status" -ne 0 ]
+ run "$S" record --kind resource --value agent:writer-1:active; [ "$status" -ne 0 ]; run "$S" record --kind remote --value push-attempted; [ "$status" -ne 0 ]; run "$S" record --kind remote --value comment-attempted; [ "$status" -ne 0 ]; run "$S" record --kind remote --value closure-attempted; [ "$status" -ne 0 ]
+ "$S" record --kind verification --value passed >/dev/null; "$S" record --kind preservation --value commit:keep-me >/dev/null; run "$S" record --kind remote --value cleanup-observed; [ "$status" -ne 0 ]
+}
+@test "resource ledger archives reviewers and cleanup requires zero active resources" {
+ "$S" init --issue 69 --base base --workspace ws >/dev/null; "$S" consume --budget reviewRounds >/dev/null; "$S" consume --budget reviewRounds >/dev/null; "$S" consume --budget reviewerReplacements >/dev/null
+ run "$S" consume --budget reviewRounds; [ "$status" -ne 0 ]; run "$S" consume --budget reviewerReplacements; [ "$status" -ne 0 ]
+ "$S" record --kind resource --value agent:reviewer-1:active >/dev/null; "$S" record --kind resource --value workspace:review-ws:active >/dev/null; run "$S" record --kind remote --value cleanup-observed; [ "$status" -ne 0 ]
+ "$S" record --kind resource --value agent:reviewer-1:archived >/dev/null; "$S" record --kind resource --value workspace:review-ws:archived >/dev/null; "$S" record --kind preservation --value commit:review-evidence >/dev/null; "$S" record --kind remote --value cleanup-attempted >/dev/null; "$S" record --kind remote --value cleanup-observed >/dev/null
+ [ "$(state "['activeResources']" | wc -l)" -eq 0 ]
+}
