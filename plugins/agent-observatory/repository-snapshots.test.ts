@@ -21,6 +21,25 @@ describe("repository snapshots", () => {
     expect((await searchRepository(directory, "password")).map((item) => item.path)).toEqual([]);
   });
 
+  it("returns only tracked files and excludes generated or dependency paths", async () => {
+    const directory = await repository();
+    for (const file of ["tracked.md", "untracked.md", "node_modules/pkg.md", "dist/output.md", "build/output.md", "generated/schema.md"]) {
+      await fs.mkdir(path.dirname(path.join(directory, file)), { recursive: true });
+      await fs.writeFile(path.join(directory, file), file);
+    }
+    execFileSync("git", ["-C", directory, "add", "tracked.md", "node_modules/pkg.md", "dist/output.md", "build/output.md", "generated/schema.md"]);
+    expect((await searchRepository(directory, "")).map((item) => item.path)).toEqual(["tracked.md"]);
+  });
+
+  it("skips a tracked symlink that escapes the repository", async () => {
+    const directory = await repository();
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), "context-shelf-outside-")); temporary.push(outside);
+    await fs.writeFile(path.join(outside, "secret.md"), "outside");
+    try { await fs.symlink(path.join(outside, "secret.md"), path.join(directory, "escape.md")); } catch { return; }
+    execFileSync("git", ["-C", directory, "add", "escape.md"]);
+    expect(await searchRepository(directory, "escape")).toEqual([]);
+  });
+
   it("bounds immutable snapshots and includes provenance metadata", async () => {
     const directory = await repository(); const content = "x".repeat(SNAPSHOT_LIMIT + 10);
     await fs.writeFile(path.join(directory, "README.md"), content); execFileSync("git", ["-C", directory, "add", "."]);
