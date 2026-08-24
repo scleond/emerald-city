@@ -90,13 +90,30 @@ export function diffEvidenceText(evidence: RepositoryDiffEvidence) {
 
 export async function gitDiffEvidence(repositoryPath: string, generatedAt = new Date().toISOString()): Promise<RepositoryDiffEvidence> {
   const root = await fs.realpath(repositoryPath);
-  const [{ stdout: names }, { stdout: numstat }, { stdout: nameStatus }] = await Promise.all([
+  const [{ stdout: names }, { stdout: numstat }, { stdout: nameStatus }, { stdout: endpointStatus }] = await Promise.all([
     execFileAsync("git", ["-C", repositoryPath, "diff", "--name-only", "-z", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 }),
     // Disable rename collapsing for classification: this gives us both binary endpoints.
     execFileAsync("git", ["-C", repositoryPath, "diff", "--no-renames", "--numstat", "-z", "--format=", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 }),
     execFileAsync("git", ["-C", repositoryPath, "diff", "--name-status", "-z", "--find-renames", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 }),
+    execFileAsync("git", ["-C", repositoryPath, "diff", "--name-status", "-z", "--no-renames", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 }),
   ]);
   const binaryPaths = binaryPathsFromNumstat(numstat.toString());
+  const endpointTokens = endpointStatus.toString().split("\0");
+  const endpointPaths: string[] = [];
+  for (let index = 0; index < endpointTokens.length; index += 1) {
+    const status = endpointTokens[index];
+    if (!status) continue;
+    if (/^[RC]\d+$/.test(status)) { if (endpointTokens[index + 1]) endpointPaths.push(endpointTokens[index + 1]); if (endpointTokens[index + 2]) endpointPaths.push(endpointTokens[index + 2]); index += 2; }
+    else if (endpointTokens[index + 1]) { endpointPaths.push(endpointTokens[index + 1]); index += 1; }
+  }
+  for (const filePath of endpointPaths) {
+    if (binaryPaths.has(filePath)) continue;
+    try {
+      const content = await fs.readFile(path.resolve(root, filePath)); if (content.includes(0)) binaryPaths.add(filePath);
+    } catch {
+      try { const result = await execFileAsync("git", ["-C", repositoryPath, "show", `HEAD:${filePath}`], { encoding: "buffer", maxBuffer: 256 * 1024 }); if (Buffer.from(result.stdout).includes(0)) binaryPaths.add(filePath); } catch { /* path may be newly added */ }
+    }
+  }
   const renameExclusions = new Map<string, string>();
   const statusRecords = nameStatus.toString().split("\0");
   for (let index = 0; index < statusRecords.length; index += 1) {
@@ -111,7 +128,7 @@ export async function gitDiffEvidence(repositoryPath: string, generatedAt = new 
   }
   const excluded: RepositoryDiffExclusion[] = [];
   const allowed: string[] = [];
-  for (const filePath of names.toString().split("\0").filter(Boolean)) {
+  for (const filePath of [...new Set([...names.toString().split("\0").filter(Boolean), ...endpointPaths])]) {
     const policyReason = renameExclusions.get(filePath) ?? exclusionReason(filePath) ?? (binaryPaths.has(filePath) ? "binary file content" : (!recognized(filePath) ? "unsupported or binary file type" : null));
     const candidate = path.resolve(root, filePath);
     let unsafe = false;

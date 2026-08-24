@@ -107,7 +107,7 @@ describe("repository snapshots", () => {
     execFileSync("git", ["-C", directory, "mv", "image.md", "renamed.md"]);
     const evidence = await gitDiffEvidence(directory);
     expect(evidence.content).not.toContain("image.md"); expect(evidence.content).not.toContain("renamed.md");
-    expect(evidence.excluded).toEqual(expect.arrayContaining([{ path: "renamed.md", reason: "binary file content" }]));
+    expect(evidence.excluded).toEqual(expect.arrayContaining([{ path: "image.md", reason: "binary file content" }, { path: "renamed.md", reason: "binary file content" }]));
     expect([...binaryPathsFromNumstat("-\t-\trenamed.md\0image.md\0")]).toEqual(["renamed.md", "image.md"]);
   });
 
