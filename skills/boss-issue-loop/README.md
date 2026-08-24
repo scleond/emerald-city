@@ -2,6 +2,10 @@
 
 A reviewed GitHub issue loop: select scoped work, delegate implementation, verify independent reviews, integrate and push, close the issue, and clean disposable resources.
 
+Run progress is persisted and restart-safe through the cross-platform helpers
+documented in [`RUN-STATE.md`](RUN-STATE.md). Reconcile state before mutation
+and record each verified external result afterward.
+
 ## Prerequisites
 
 - **`gh` CLI** — authenticated (`gh auth status`), with permission to read/write issues, labels, and comments on the target repository.

@@ -216,21 +216,37 @@ tracker state and report the unsupported operation.
 
 ## Issue Loop
 
+Before each run and after every restart, load and reconcile the persisted
+state using [`RUN-STATE.md`](RUN-STATE.md). Reconciliation is read-before-write:
+observe an already completed implementation, review, push, or closure effect,
+then continue from the recorded phase without repeating that effect. Before a
+mutation, reserve the issue ownership and the relevant budget; after a
+verification, review, preservation, push, or closure succeeds, record its
+small result immediately. Mark `complete`, `blocked`, or `degraded` only as a
+terminal outcome and preserve the accepted commit and review evidence before
+cleanup.
+
+Required coordinator sequence: `init`/`get` → `reconcile` observed effects →
+`transition` to the next phase → `record` each verified result (including
+`fixedPoint` and `preservation`) → `outcome`. Use the documented native option
+syntax: PowerShell `-Issue`, `-Phase`, `-Kind`, `-Value`, and `-PermissionId`;
+Bash `--issue`, `--phase`, `--kind`, `--value`, and `--permission-id`.
+
 **Coordinator branch** is the branch the coordinator maintains for integration.
 Default: `main`. The accepted base commit is the coordinator branch head at the
 start of each iteration; the coordinator never advances the branch except in
 step 8.
 
-1. Read the repository issue-tracker docs, preferences, provider catalog, worktree status, configured orchestration policy and adapter, active agents, and open GitHub issues.
-2. Select the first unblocked issue in scope and tracker order. Confirm no active agent or workspace already owns its issue label. Record the accepted base commit (the current HEAD of the coordinator branch).
+1. Read the repository issue-tracker docs, preferences, provider catalog, worktree status, configured orchestration policy and adapter, active agents, and open GitHub issues. Reconcile any persisted run state before mutation.
+2. Select the first unblocked issue in scope and tracker order. Confirm no active agent or workspace already owns its issue label. Atomically initialize state with the accepted base commit (the current HEAD of the coordinator branch).
 3. Through the adapter, create `issue-<number>-<slug>` from the accepted base commit. Pass the exact issue number, base commit, and workspace ID to the implementer.
 4. Render and send the Implementer Handoff Contract below. Fill every placeholder with the exact issue, accepted base, workspace, and repository-specific commands discovered in step 1. The implementer must commit all changes before running the final ticket verification gate.
-5. Accept only a committed, linear, clean worktree whose verification gates pass. Apply the issue budgets and escalation policy in `MODEL-SELECTION.md`; preserve the clean worktree and commit during capability escalation unless the policy's restart conditions apply.
+5. Accept only a committed, linear, clean worktree whose verification gates pass. Apply the issue budgets and escalation policy in `MODEL-SELECTION.md`; record the verified result and preserve the clean worktree and commit during capability escalation unless the policy's restart conditions apply.
 6. Classify review risk independently from implementation difficulty, resolve the reviewer count from `MODEL-SELECTION.md`, and launch the required independent read-only reviewers. Select review tiers appropriate to the ranked difficulty, give reviewers the fixed-point diff and issue specification, and deliver the Reviewer Contract below. Report both rationales and ask for concrete findings with file/line references, separating hard defects from advisory concerns.
 7. Verify every claimed failure yourself. For bounded findings, resume the current writer with targeted instructions and run targeted re-review. Use a full fresh review only after a material behavior change. Archive completed reviewers before any new review launch, and apply the review-round and replacement limits from `MODEL-SELECTION.md`.
-8. Integrate only the verified commit into the coordinator branch with a non-interactive fast-forward or merge. Inspect status, diff, and log before integration.
-9. Push the integrated branch to its configured remote. Close the issue with a concise implementation and verification comment only after the push succeeds.
-10. Through the adapter, archive completed issue agents and disposable workspaces, including stale instances carrying the completed issue label. Preserve the commit and useful review evidence before cleanup.
+8. Integrate only the verified commit into the coordinator branch with a non-interactive fast-forward or merge. Inspect status, diff, and log before integration, then record the verified integration result.
+9. Push the integrated branch to its configured remote. Record the push result, then close the issue with a concise implementation and verification comment only after the push succeeds; record closure afterward.
+10. Through the adapter, archive completed issue agents and disposable workspaces, including stale instances carrying the completed issue label. Preserve the commit and useful review evidence before cleanup, then record cleanup.
 11. Re-read the open issue frontier and start the next iteration from the new accepted base commit.
 
 ## Stop Conditions
