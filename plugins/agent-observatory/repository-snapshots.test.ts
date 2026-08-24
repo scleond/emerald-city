@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { repositoryItem, searchRepository, SNAPSHOT_LIMIT, snapshotText } from "./repository-snapshots";
+import { diffEvidenceText, gitDiffEvidence, repositoryItem, searchRepository, SNAPSHOT_LIMIT, snapshotText } from "./repository-snapshots";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
@@ -60,4 +60,13 @@ describe("repository snapshots", () => {
   });
 
   it("represents repository selection explicitly", () => expect(repositoryItem("C:\\repo").resourceType).toBe("repository"));
+
+  it("returns bounded working-tree diff evidence with provenance", async () => {
+    const directory = await repository();
+    await fs.writeFile(path.join(directory, "README.md"), "before\n"); execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]);
+    await fs.writeFile(path.join(directory, "README.md"), "after\n");
+    const evidence = await gitDiffEvidence(directory, "2026-01-01T00:00:00.000Z");
+    expect(evidence).toMatchObject({ source: "git-diff", truncated: false, generatedAt: "2026-01-01T00:00:00.000Z" });
+    expect(evidence.content).toContain("-before"); expect(evidence.content).toContain("+after"); expect(diffEvidenceText(evidence)).toContain("Source: git-diff");
+  });
 });

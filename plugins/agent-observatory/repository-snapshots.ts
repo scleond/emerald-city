@@ -5,18 +5,27 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 export const SNAPSHOT_LIMIT = 32_000;
+export const DIFF_LIMIT = 32_000;
 const DOCUMENT_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst", ".adoc", ".json", ".yaml", ".yml", ".toml", ".ts", ".tsx", ".js", ".jsx", ".css", ".scss", ".html", ".xml", ".csv"]);
 const EXCLUDED_PARTS = new Set([".git", "node_modules", ".env", ".venv", "dist", "build", "generated", "coverage"]);
 const SECRET_NAME = /(^|[._-])(secret|secrets|credential|credentials|token|passwords?|passwd|apikey|api-key)([._-]|$)/i;
 const ENVIRONMENT_FILE = /^\.env(?:\..+)?$/i;
 
 export interface RepositorySnapshot { path: string; title: string; source: "tracked"; content: string; truncated: boolean; generatedAt: string; }
+export interface RepositoryDiffEvidence { path: string; title: string; source: "git-diff"; content: string; truncated: boolean; generatedAt: string; }
 export interface RepositorySearchItem { id: string; identifier: string; title: string; subtitle?: string; url: string; text: string; resourceType: "repository-snapshot" | "repository"; }
 
-function excluded(filePath: string) {
+export function exclusionReason(filePath: string): string | null {
   const parts = filePath.split(/[\\/]/);
-  return parts.some((part) => EXCLUDED_PARTS.has(part) || ENVIRONMENT_FILE.test(part) || SECRET_NAME.test(part));
+  const excludedPart = parts.find((part) => EXCLUDED_PARTS.has(part));
+  if (excludedPart) return `excluded directory or dependency path: ${excludedPart}`;
+  const environmentPart = parts.find((part) => ENVIRONMENT_FILE.test(part));
+  if (environmentPart) return `environment file: ${environmentPart}`;
+  const secretPart = parts.find((part) => SECRET_NAME.test(part));
+  if (secretPart) return `secret-like filename: ${secretPart}`;
+  return null;
 }
+function excluded(filePath: string) { return exclusionReason(filePath) !== null; }
 function recognized(filePath: string) { return DOCUMENT_EXTENSIONS.has(path.extname(filePath).toLowerCase()) && !excluded(filePath); }
 
 export async function trackedDocumentPaths(repositoryPath: string): Promise<string[]> {
@@ -55,6 +64,16 @@ export async function searchRepository(repositoryPath: string, query: string, ge
 
 export function snapshotText(snapshot: RepositorySnapshot) {
   return [`# ${snapshot.title}`, `Source: ${snapshot.source} file ${snapshot.path}`, `Generated: ${snapshot.generatedAt}`, `Truncated: ${snapshot.truncated ? "yes" : "no"}`, "", snapshot.content].join("\n");
+}
+
+export function diffEvidenceText(evidence: RepositoryDiffEvidence) {
+  return [`# ${evidence.title}`, `Source: ${evidence.source}`, `Generated: ${evidence.generatedAt}`, `Truncated: ${evidence.truncated ? "yes" : "no"}`, "", evidence.content].join("\n");
+}
+
+export async function gitDiffEvidence(repositoryPath: string, generatedAt = new Date().toISOString()): Promise<RepositoryDiffEvidence> {
+  const { stdout } = await execFileAsync("git", ["-C", repositoryPath, "diff", "HEAD", "--", "."], { maxBuffer: DIFF_LIMIT * 2 });
+  const truncated = stdout.length > DIFF_LIMIT;
+  return { path: ".", title: "Working tree diff", source: "git-diff", content: stdout.slice(0, DIFF_LIMIT) || "No tracked changes in the working tree.", truncated, generatedAt };
 }
 
 export function repositoryItem(repositoryPath: string): RepositorySearchItem {

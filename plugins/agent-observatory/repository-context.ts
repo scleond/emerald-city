@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { defineAttachmentSource, defineRpc, PluginAttachmentSearchPayloadSchema, type PluginHandlerContext } from "@getpaseo/plugin/server";
-import { repositoryItem, searchRepository, snapshotText } from "./repository-snapshots";
+import { diffEvidenceText, gitDiffEvidence, repositoryItem, searchRepository, snapshotText } from "./repository-snapshots";
 
 export const repositoryContextSearch = defineRpc({
   name: "repository-context.search",
@@ -27,5 +27,8 @@ export async function searchRepositoryContext(input: z.output<typeof repositoryC
   }
   if (!entries.some((entry) => entry.projectKind === "git" && entry.workspaceDirectory === repositoryPath)) return { items: [] };
   const snapshots = await searchRepository(repositoryPath, input.query);
-  return { items: snapshots.map((snapshot) => ({ id: `${repositoryPath}:${snapshot.path}`, identifier: snapshot.path, title: snapshot.title, subtitle: snapshot.truncated ? "Tracked document (truncated)" : "Tracked document", url: `context://repository/${encodeURIComponent(repositoryPath)}/${encodeURIComponent(snapshot.path)}`, text: snapshotText(snapshot), resourceType: "repository-snapshot" })) };
+  const diff = await gitDiffEvidence(repositoryPath);
+  const items = snapshots.map((snapshot) => ({ id: `${repositoryPath}:${snapshot.path}`, identifier: snapshot.path, title: snapshot.title, subtitle: snapshot.truncated ? "Tracked document (truncated)" : "Tracked document", url: `context://repository/${encodeURIComponent(repositoryPath)}/${encodeURIComponent(snapshot.path)}`, text: snapshotText(snapshot), resourceType: "repository-snapshot" as const }));
+  if (!input.query.trim() || "diff".includes(input.query.trim().toLowerCase())) items.unshift({ id: `${repositoryPath}:.git-diff`, identifier: ".git-diff", title: diff.title, subtitle: diff.truncated ? "Git diff (truncated)" : "Git diff evidence", url: `context://repository/${encodeURIComponent(repositoryPath)}/.git-diff`, text: diffEvidenceText(diff), resourceType: "repository-snapshot" as const });
+  return { items };
 }
