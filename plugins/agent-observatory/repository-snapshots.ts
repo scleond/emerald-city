@@ -8,13 +8,14 @@ export const SNAPSHOT_LIMIT = 32_000;
 const DOCUMENT_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst", ".adoc", ".json", ".yaml", ".yml", ".toml", ".ts", ".tsx", ".js", ".jsx", ".css", ".scss", ".html", ".xml", ".csv"]);
 const EXCLUDED_PARTS = new Set([".git", "node_modules", ".env", ".venv", "dist", "build", "generated", "coverage"]);
 const SECRET_NAME = /(^|[._-])(secret|secrets|credential|credentials|token|passwords?|passwd|apikey|api-key)([._-]|$)/i;
+const ENVIRONMENT_FILE = /^\.env(?:\..+)?$/i;
 
 export interface RepositorySnapshot { path: string; title: string; source: "tracked"; content: string; truncated: boolean; generatedAt: string; }
 export interface RepositorySearchItem { id: string; identifier: string; title: string; subtitle?: string; url: string; text: string; resourceType: "repository-snapshot" | "repository"; }
 
 function excluded(filePath: string) {
   const parts = filePath.split(/[\\/]/);
-  return parts.some((part) => EXCLUDED_PARTS.has(part) || SECRET_NAME.test(part));
+  return parts.some((part) => EXCLUDED_PARTS.has(part) || ENVIRONMENT_FILE.test(part) || SECRET_NAME.test(part));
 }
 function recognized(filePath: string) { return DOCUMENT_EXTENSIONS.has(path.extname(filePath).toLowerCase()) && !excluded(filePath); }
 

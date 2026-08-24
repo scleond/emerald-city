@@ -21,6 +21,17 @@ describe("repository snapshots", () => {
     expect((await searchRepository(directory, "password")).map((item) => item.path)).toEqual([]);
   });
 
+  it("excludes tracked environment variants at every path depth while keeping safe files", async () => {
+    const directory = await repository();
+    for (const file of [".env.local", ".env.production", "config/.env.development", "config/settings.md"]) {
+      await fs.mkdir(path.dirname(path.join(directory, file)), { recursive: true });
+      await fs.writeFile(path.join(directory, file), file);
+    }
+    execFileSync("git", ["-C", directory, "add", "."]);
+    expect((await searchRepository(directory, "")).map((item) => item.path)).toEqual(["config/settings.md"]);
+    expect((await searchRepository(directory, "env")).map((item) => item.path)).toEqual([]);
+  });
+
   it("returns only tracked files and excludes generated or dependency paths", async () => {
     const directory = await repository();
     for (const file of ["tracked.md", "untracked.md", "node_modules/pkg.md", "dist/output.md", "build/output.md", "generated/schema.md"]) {
