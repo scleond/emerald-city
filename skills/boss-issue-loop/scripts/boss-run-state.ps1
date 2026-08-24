@@ -21,6 +21,7 @@ $script:Next=@{selected=@('implementing');implementing=@('verifying');verifying=
 $script:Limits=@{recoveryPrompts=1;writerLaunches=2;reviewRounds=2;reviewerReplacements=1}
 $script:OpaquePattern='^[A-Za-z0-9][A-Za-z0-9._:/-]{0,63}$'
 $script:CommitPattern='^commit:[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$'
+$script:StateMigrated=$false
 
 function Fail([string]$Message){throw $Message}
 function StatePath {
@@ -37,7 +38,14 @@ function Read-JsonFile([string]$Path){
     try{return (Get-Content -Raw -LiteralPath $Path|ConvertFrom-Json -ErrorAction Stop)}catch{Fail 'Run-state file is unreadable or malformed.'}
 }
 function Read-State{return Read-JsonFile (StatePath)}
-function Ensure-StateShape($State){if($null -eq $State){return $null};if($null -eq $State.remoteStates){$State|Add-Member -NotePropertyName remoteStates -NotePropertyValue @()};if($null -eq $State.activeResources){$State|Add-Member -NotePropertyName activeResources -NotePropertyValue @()};if($null -eq $State.resourceEvents){$State|Add-Member -NotePropertyName resourceEvents -NotePropertyValue @()};if($null -eq $State.permissionReconciliationIds){$State|Add-Member -NotePropertyName permissionReconciliationIds -NotePropertyValue @()};if($null -eq $State.degraded){$State|Add-Member -NotePropertyName degraded -NotePropertyValue ($State.outcome -eq 'degraded')};if($null -eq $State.noNewAgents){$State|Add-Member -NotePropertyName noNewAgents -NotePropertyValue ($State.outcome -eq 'degraded')};return $State}
+function Ensure-Property($State,[string]$Name,$Value){$property=$State.PSObject.Properties[$Name];if($null -eq $property -or $null -eq $property.Value){if($null -eq $property){$State|Add-Member -NotePropertyName $Name -NotePropertyValue $Value}else{$State.$Name=$Value}}}
+function Ensure-StateShape($State){
+    if($null -eq $State){return $null}
+    $schema=$State.PSObject.Properties['schemaVersion'];$script:StateMigrated=$null -eq $schema -or [int]$schema.Value -lt 2
+    if($script:StateMigrated){if($null -eq $schema){$State|Add-Member -NotePropertyName schemaVersion -NotePropertyValue 2}else{$State.schemaVersion=2}}
+    Ensure-Property $State 'remoteStates' @();Ensure-Property $State 'activeResources' @();Ensure-Property $State 'resourceEvents' @();Ensure-Property $State 'permissionReconciliationIds' @()
+    Ensure-Property $State 'degraded' ($State.outcome -eq 'degraded');Ensure-Property $State 'noNewAgents' ($State.outcome -eq 'degraded');return $State
+}
 function Write-JsonFile([string]$Path,$State){
     $dir=Split-Path -Parent $Path;New-Item -ItemType Directory -Force -Path $dir|Out-Null
     $tmp="$Path.$([guid]::NewGuid().ToString('N')).tmp"
@@ -95,7 +103,7 @@ function Archive-And-Initialize($Previous){
     $new=New-State $Issue $Base $Workspace;Write-State $new;return $new
 }
 function Main{
-    $State=Ensure-StateShape (Read-State)
+    $State=Ensure-StateShape (Read-State);if($script:StateMigrated){Write-State $State}
     switch($Command){
         'init' {
             if($Issue -le 0 -or [string]::IsNullOrWhiteSpace($Base) -or [string]::IsNullOrWhiteSpace($Workspace)){Fail 'init requires -Issue, -Base, and -Workspace.'}

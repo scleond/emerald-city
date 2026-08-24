@@ -22,6 +22,11 @@ state(){ python -c "import json;print(json.load(open('$BOSS_ISSUE_LOOP_STATE_PAT
  "$S" init --issue 68 --base base --workspace ws >/dev/null; "$S" transition --phase implementing >/dev/null; "$S" transition --phase verifying >/dev/null; "$S" record --kind verification --value passed >/dev/null; "$S" transition --phase reviewing >/dev/null; "$S" record --kind review --value approved >/dev/null; "$S" record --kind preservation --value commit:abc123 >/dev/null; "$S" transition --phase integrating >/dev/null; "$S" transition --phase pushed >/dev/null; "$S" transition --phase closed >/dev/null; "$S" transition --phase cleaned >/dev/null; "$S" outcome --status complete >/dev/null
  "$S" init --issue 69 --base nextbase --workspace ws >/dev/null; [ "$(state "['issue']")" = 69 ]; test "$(find "$(dirname "$BOSS_ISSUE_LOOP_STATE_PATH")/history" -name '*.json' | wc -l)" -eq 1
 }
+@test "v1 state is migrated and persisted as normalized schema version 2" {
+ python -c "import json,sys; json.dump({'schemaVersion':1,'issue':69,'workspace':'ws','acceptedBase':'base','phase':'selected','outcome':None,'revision':0,'budgets':{'recoveryPrompts':0,'writerLaunches':0,'reviewRounds':0,'reviewerReplacements':0},'verified':False,'reviewed':False,'preserved':False,'preservedCommit':None,'fixedPointCommit':None,'preservationEvidence':None,'observations':[],'permissionAttempts':0,'handledPermissionIds':[]},open(sys.argv[1],'w'))" "$BOSS_ISSUE_LOOP_STATE_PATH"
+ migrated="$("$S" get)"
+ python -c "import json,sys; s=json.loads(sys.argv[1]); p=json.load(open(sys.argv[2])); assert s['schemaVersion']==2 and p['schemaVersion']==2; assert s['remoteStates']==[] and s['activeResources']==[] and s['resourceEvents']==[] and s['permissionReconciliationIds']==[] and s['degraded'] is False and s['noNewAgents'] is False" "$migrated" "$BOSS_ISSUE_LOOP_STATE_PATH"
+}
 @test "recursive permission degrades once and prevents subsequent launches" {
  "$S" init --issue 69 --base base --workspace ws >/dev/null
  "$S" permission --permission-id req-recursive --permission-mode recursive >/dev/null
@@ -33,7 +38,7 @@ state(){ python -c "import json;print(json.load(open('$BOSS_ISSUE_LOOP_STATE_PAT
 @test "remote attempts and observations are distinct and replay-safe" {
  "$S" init --issue 69 --base base --workspace ws >/dev/null
  "$S" record --kind remote --value push-attempted >/dev/null; rev="$(state "['revision']")"; "$S" record --kind remote --value push-attempted >/dev/null; [ "$(state "['revision']")" = "$rev" ]
- "$S" record --kind remote --value push-observed >/dev/null; "$S" record --kind remote --value comment-attempted >/dev/null; "$S" record --kind remote --value comment-observed >/dev/null; "$S" record --kind remote --value cleanup-attempted >/dev/null; "$S" record --kind remote --value cleanup-observed >/dev/null; [ "$(state "['remoteStates']" | wc -l)" -ge 1 ]
+ "$S" record --kind remote --value push-observed >/dev/null; "$S" record --kind remote --value comment-attempted >/dev/null; "$S" record --kind remote --value comment-observed >/dev/null; "$S" record --kind preservation --value commit:remote-evidence >/dev/null; "$S" record --kind remote --value cleanup-attempted >/dev/null; "$S" record --kind remote --value cleanup-observed >/dev/null; [ "$(state "['remoteStates']" | wc -l)" -ge 1 ]
 }
 @test "fresh low-risk path permits bounded writer and reviewer launches" {
  "$S" init --issue 69 --base base --workspace ws >/dev/null; "$S" consume --budget writerLaunches >/dev/null; "$S" consume --budget reviewRounds >/dev/null
@@ -48,7 +53,7 @@ state(){ python -c "import json;print(json.load(open('$BOSS_ISSUE_LOOP_STATE_PAT
  run "$S" record --kind review --value approved; [ "$status" -ne 0 ]; "$S" consume --budget recoveryPrompts >/dev/null
  run "$S" consume --budget writerLaunches; [ "$status" -ne 0 ]; run "$S" consume --budget reviewRounds; [ "$status" -ne 0 ]; run "$S" consume --budget reviewerReplacements; [ "$status" -ne 0 ]
  run "$S" record --kind resource --value agent:writer-1:active; [ "$status" -ne 0 ]; run "$S" record --kind remote --value push-attempted; [ "$status" -ne 0 ]; run "$S" record --kind remote --value comment-attempted; [ "$status" -ne 0 ]; run "$S" record --kind remote --value closure-attempted; [ "$status" -ne 0 ]
- "$S" record --kind verification --value passed >/dev/null; "$S" record --kind preservation --value commit:keep-me >/dev/null; run "$S" record --kind remote --value cleanup-observed; [ "$status" -ne 0 ]
+ "$S" record --kind verification --value passed >/dev/null; "$S" record --kind preservation --value commit:keep-me >/dev/null; "$S" record --kind remote --value cleanup-attempted >/dev/null; "$S" record --kind remote --value cleanup-observed >/dev/null
 }
 @test "resource ledger archives reviewers and cleanup requires zero active resources" {
  "$S" init --issue 69 --base base --workspace ws >/dev/null; "$S" consume --budget reviewRounds >/dev/null; "$S" consume --budget reviewRounds >/dev/null; "$S" consume --budget reviewerReplacements >/dev/null

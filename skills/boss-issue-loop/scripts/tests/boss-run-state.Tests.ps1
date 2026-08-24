@@ -1,7 +1,7 @@
 $here=Split-Path -Parent $MyInvocation.MyCommand.Path
 $script=Join-Path $here '..\boss-run-state.ps1'
 function Run-State { & $script @args 2>$null }
-function Expect-Failure { & $script @args 2>$null; $LASTEXITCODE | Should Not Be 0 }
+function Expect-Failure { $global:LASTEXITCODE=0; $null=& $script @args 2>$null; $exitCode=$global:LASTEXITCODE; $exitCode | Should Not Be 0 }
 
 Describe 'boss-run-state.ps1' {
  BeforeEach { $env:BOSS_ISSUE_LOOP_STATE_PATH=Join-Path $TestDrive 'run-state.json'; Remove-Item -LiteralPath $env:BOSS_ISSUE_LOOP_STATE_PATH -Force -ErrorAction SilentlyContinue }
@@ -46,6 +46,30 @@ Describe 'boss-run-state.ps1' {
   Run-State transition -Phase implementing | Out-Null; Run-State transition -Phase verifying | Out-Null; Run-State record -Kind verification -Value passed | Out-Null; Run-State transition -Phase reviewing | Out-Null; Run-State record -Kind review -Value approved | Out-Null; Run-State record -Kind preservation -Value commit:abc123 | Out-Null; Run-State transition -Phase integrating | Out-Null; Run-State transition -Phase pushed | Out-Null; Run-State transition -Phase closed | Out-Null; Run-State transition -Phase cleaned | Out-Null; Run-State outcome -Status complete | Out-Null
   $next=Run-State init -Issue 69 -Base nextbase -Workspace ws | ConvertFrom-Json
   $next.issue | Should Be 69; (Get-ChildItem (Join-Path $TestDrive 'history') -Filter '*.json').Count | Should Be 1
+ }
+
+ It 'does not treat a deliberately successful helper call as a failure' {
+  Run-State init -Issue 69 -Base base -Workspace ws | Out-Null
+  Expect-Failure record -Kind verification -Value failed
+  $caught=$false
+  try { Expect-Failure get } catch { $caught=$true }
+  $caught | Should Be $true
+ }
+
+ It 'migrates v1 state to persisted normalized schema version 2' {
+  $v1=[ordered]@{
+   schemaVersion=1; issue=69; workspace='ws'; acceptedBase='base'; phase='selected'; outcome=$null; revision=0
+   budgets=[ordered]@{recoveryPrompts=0;writerLaunches=0;reviewRounds=0;reviewerReplacements=0}
+   verified=$false; reviewed=$false; preserved=$false; preservedCommit=$null; fixedPointCommit=$null
+   preservationEvidence=$null; observations=@(); permissionAttempts=0; handledPermissionIds=@()
+  } | ConvertTo-Json -Depth 5 -Compress
+  Set-Content -LiteralPath $env:BOSS_ISSUE_LOOP_STATE_PATH -Value $v1 -Encoding UTF8
+  $migrated=Run-State get | ConvertFrom-Json
+  $migrated.schemaVersion | Should Be 2
+  $migrated.remoteStates.Count | Should Be 0; $migrated.activeResources.Count | Should Be 0; $migrated.resourceEvents.Count | Should Be 0
+  $migrated.permissionReconciliationIds.Count | Should Be 0; $migrated.degraded | Should Be $false; $migrated.noNewAgents | Should Be $false
+  $persisted=Get-Content -Raw -LiteralPath $env:BOSS_ISSUE_LOOP_STATE_PATH | ConvertFrom-Json
+  $persisted.schemaVersion | Should Be 2
  }
 
  It 'degrades once on recursive permission and blocks every later launch' {
@@ -113,8 +137,9 @@ Describe 'boss-run-state.ps1' {
   Expect-Failure record -Kind resource -Value agent:writer-1:active
   Expect-Failure record -Kind remote -Value push-attempted; Expect-Failure record -Kind remote -Value comment-attempted; Expect-Failure record -Kind remote -Value closure-attempted
   Run-State record -Kind verification -Value passed | Out-Null; Run-State record -Kind preservation -Value commit:keep-me | Out-Null
-  Expect-Failure record -Kind remote -Value cleanup-observed
+  Run-State record -Kind remote -Value cleanup-attempted | Out-Null; Run-State record -Kind remote -Value cleanup-observed | Out-Null
   $state=Run-State get | ConvertFrom-Json; $state.reviewed | Should Be $false; $state.budgets.recoveryPrompts | Should Be 1
+  (@($state.remoteStates) -contains 'cleanup-attempted') | Should Be $true; (@($state.remoteStates) -contains 'cleanup-observed') | Should Be $true
  }
 
  It 'requires resource archival before cleanup and exercises reviewer churn bounds' {

@@ -19,8 +19,10 @@ def read_file(p):
 def read():
     s=read_file(path())
     if s is not None:
+        migrated=int(s.get('schemaVersion',1))<2
         s.setdefault('remoteStates',[]);s.setdefault('activeResources',[]);s.setdefault('resourceEvents',[]);s.setdefault('permissionReconciliationIds',[])
         s.setdefault('degraded',s.get('outcome')=='degraded');s.setdefault('noNewAgents',s.get('outcome')=='degraded')
+        if migrated:s['schemaVersion']=2;write(s)
     return s
 def write_file(p,s):
     p.parent.mkdir(parents=True,exist_ok=True);fd,t=tempfile.mkstemp(prefix=p.name+'.',suffix='.tmp',dir=p.parent);os.close(fd)
