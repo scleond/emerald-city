@@ -6,8 +6,6 @@ const inFlight = new Map<string, { controller: AbortController; token: symbol; r
 export function disposeShipGate(): void { for (const entry of inFlight.values()) entry.controller.abort(); inFlight.clear(); }
 
 export default function contribute(plugin: PluginContext) {
-  const lifecycle = plugin as PluginContext & { onDispose?: (callback: () => void) => void; dispose?: (callback: () => void) => void };
-  (lifecycle.onDispose ?? lifecycle.dispose)?.call(lifecycle, disposeShipGate);
   plugin.addWorkspacePanel({ id: "ship-gate", title: "Ship Gate", icon: "ShieldCheck", context: "workspace", Component: ShipGatePanel });
   // The daemon adapter intentionally accepts only a workspace path and a trusted policy
   // assembled by configuration; no client RPC accepts arbitrary command text in this MVP.
@@ -20,4 +18,5 @@ export default function contribute(plugin: PluginContext) {
       return { generation: input.generation, report: { ...report, results: [...report.results] } }; } finally { if (inFlight.get(input.workspaceId)?.token === token) inFlight.delete(input.workspaceId); }
   });
   plugin.handle(cancelShipGateRpc, async (input, ctx) => { const authorized = (await ctx.paseo.workspaces.list()).entries.some((entry) => entry.id === input.workspaceId); if (!authorized) throw new Error("workspace is not authorized or no longer exists"); const entry = inFlight.get(input.workspaceId); if (!entry || entry.runToken !== input.runToken) return { cancelled: false }; entry.controller.abort(); return { cancelled: true }; });
+  return disposeShipGate;
 }
