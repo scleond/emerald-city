@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createUsageTurnStore, projectHistoricalUsage, type UsageTurnFileStorage, type NormalizedUsageTurn } from "./usage-turns";
 import { historySourceLabel, prepareSanitizedUsageExport, projectHistoryForRange, sanitizedUsageExport } from "./usage-history";
+import { estimateOpenCodeGoCost, OPENCODE_GO_PRICING_VERSION } from "./opencode-go-pricing";
 import { normalizeUsageEvent } from "./observation";
 import { emptyAgentUsage, fallbackUsageIdentity, reduceAgentUsage } from "./observation";
 
@@ -12,6 +13,19 @@ function turn(overrides: Partial<NormalizedUsageTurn> = {}): NormalizedUsageTurn
 }
 
 describe("usage turn store", () => {
+  it("estimates versioned OpenCode Go pricing with cached input and context tiers", () => {
+    expect(OPENCODE_GO_PRICING_VERSION).toBe("2026-08-23");
+    expect(estimateOpenCodeGoCost({ provider: "opencode-go", model: "gpt-5.6-luna", inputTokens: 272_000, cachedInputTokens: 100_000, outputTokens: 1_000, contextUsedTokens: 272_000 })).toBeCloseTo(.0344);
+    expect(estimateOpenCodeGoCost({ provider: "opencode-go", model: "gpt-5.6-luna", inputTokens: 272_000, cachedInputTokens: 100_000, outputTokens: 1_000, contextUsedTokens: 272_001 })).toBeCloseTo(.0746);
+  });
+
+  it("does not borrow pricing across providers and preserves exact, free, and unknown costs", () => {
+    expect(estimateOpenCodeGoCost({ provider: "zen", model: "gpt-5.6-luna", inputTokens: 1, outputTokens: 1 })).toBeNull();
+    expect(estimateOpenCodeGoCost({ provider: "opencode-go", model: "ox-alpha-free", inputTokens: 100, outputTokens: 100 })).toBe(0);
+    expect(estimateOpenCodeGoCost({ provider: "opencode-go", model: "not-a-model", inputTokens: 100, outputTokens: 100 })).toBeNull();
+    const projected = projectHistoricalUsage([turn({ provider: "opencode-go", model: "gpt-5.6-luna", costUsd: 9, costState: "complete" })], "30d", Date.parse("2026-01-20T00:00:00.000Z"));
+    expect(projected.reportedCostUsd).toBe(9);
+  });
   it("deduplicates anonymous final events without using observedAt as identity", () => {
     const event = { kind: "final" as const, model: "model", usage: { inputTokens: 10, outputTokens: 2 }, observedAt: "2026-01-01T00:00:00.000Z" };
     const once = reduceAgentUsage(emptyAgentUsage(), event);

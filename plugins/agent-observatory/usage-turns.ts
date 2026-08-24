@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { defineRpc } from "@getpaseo/plugin";
+import { estimateOpenCodeGoCost } from "./opencode-go-pricing";
 
 const nullableNumber = z.number().finite().nonnegative().nullable();
 
@@ -91,6 +92,12 @@ export interface UsageAnalyticsBucket {
   costState: HistoricalCostState;
 }
 
+function withEstimatedCost(turn: NormalizedUsageTurn): NormalizedUsageTurn {
+  if (turn.costUsd !== null) return turn;
+  const costUsd = estimateOpenCodeGoCost({ provider: turn.provider, model: turn.canonicalModelId ?? turn.model, inputTokens: turn.inputTokens, cachedInputTokens: turn.cachedInputTokens, outputTokens: turn.outputTokens, contextUsedTokens: turn.contextUsedTokens });
+  return costUsd === null ? turn : { ...turn, costUsd, costState: costUsd === 0 ? "complete" : "partial" };
+}
+
 function analytics(turns: readonly NormalizedUsageTurn[], dimension: "model" | "workspace"): UsageAnalyticsBucket[] {
   const buckets = new Map<string, NormalizedUsageTurn[]>();
   for (const turn of turns) {
@@ -125,7 +132,7 @@ export function projectHistoricalUsage(
 ): HistoricalUsageProjection {
   const to = now;
   const from = to - USAGE_RANGES[range];
-  const selected = turns
+  const selected = turns.map(withEstimatedCost)
     .filter((turn) => turn.confidence !== "low")
     .filter((turn) => {
       const at = Date.parse(turn.completedAt ?? turn.startedAt ?? turn.observedAt);
