@@ -6,13 +6,15 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 export const SNAPSHOT_LIMIT = 32_000;
 export const DIFF_LIMIT = 32_000;
+const EXCLUSION_LIMIT = 100;
 const DOCUMENT_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst", ".adoc", ".json", ".yaml", ".yml", ".toml", ".ts", ".tsx", ".js", ".jsx", ".css", ".scss", ".html", ".xml", ".csv"]);
 const EXCLUDED_PARTS = new Set([".git", "node_modules", ".env", ".venv", "dist", "build", "generated", "coverage"]);
 const SECRET_NAME = /(^|[._-])(secret|secrets|credential|credentials|token|passwords?|passwd|apikey|api-key)([._-]|$)/i;
 const ENVIRONMENT_FILE = /^\.env(?:\..+)?$/i;
 
 export interface RepositorySnapshot { path: string; title: string; source: "tracked"; content: string; truncated: boolean; generatedAt: string; }
-export interface RepositoryDiffEvidence { path: string; title: string; source: "git-diff"; content: string; truncated: boolean; generatedAt: string; }
+export interface RepositoryDiffExclusion { path: string; reason: string; }
+export interface RepositoryDiffEvidence { path: string; title: string; source: "git-diff"; basis: "HEAD working tree"; content: string; truncated: boolean; generatedAt: string; excluded: RepositoryDiffExclusion[]; }
 export interface RepositorySearchItem { id: string; identifier: string; title: string; subtitle?: string; url: string; text: string; resourceType: "repository-snapshot" | "repository"; }
 
 export function exclusionReason(filePath: string): string | null {
@@ -67,13 +69,43 @@ export function snapshotText(snapshot: RepositorySnapshot) {
 }
 
 export function diffEvidenceText(evidence: RepositoryDiffEvidence) {
-  return [`# ${evidence.title}`, `Source: ${evidence.source}`, `Generated: ${evidence.generatedAt}`, `Truncated: ${evidence.truncated ? "yes" : "no"}`, "", evidence.content].join("\n");
+  const exclusions = evidence.excluded.length === 0 ? "None" : evidence.excluded.map(({ path: filePath, reason }) => `- ${filePath}: ${reason}`).join("\n");
+  return [`# ${evidence.title}`, `Source: ${evidence.source}`, `Basis: ${evidence.basis}`, `Generated: ${evidence.generatedAt}`, `Truncated: ${evidence.truncated ? "yes" : "no"}`, "Excluded paths:", exclusions, "", evidence.content].join("\n");
 }
 
 export async function gitDiffEvidence(repositoryPath: string, generatedAt = new Date().toISOString()): Promise<RepositoryDiffEvidence> {
-  const { stdout } = await execFileAsync("git", ["-C", repositoryPath, "diff", "HEAD", "--", "."], { maxBuffer: DIFF_LIMIT * 2 });
-  const truncated = stdout.length > DIFF_LIMIT;
-  return { path: ".", title: "Working tree diff", source: "git-diff", content: stdout.slice(0, DIFF_LIMIT) || "No tracked changes in the working tree.", truncated, generatedAt };
+  const root = await fs.realpath(repositoryPath);
+  const { stdout: names } = await execFileAsync("git", ["-C", repositoryPath, "diff", "--name-only", "-z", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 });
+  const excluded: RepositoryDiffExclusion[] = [];
+  const allowed: string[] = [];
+  for (const filePath of names.toString().split("\0").filter(Boolean)) {
+    const policyReason = exclusionReason(filePath) ?? (!recognized(filePath) ? "unsupported or binary file type" : null);
+    const candidate = path.resolve(root, filePath);
+    let unsafe = false;
+    try {
+      const target = await fs.realpath(candidate);
+      const relative = path.relative(root, target);
+      unsafe = relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
+    } catch {
+      // A deleted file has no current target and is safe to diff by its tracked path.
+    }
+    const reason = policyReason ?? (unsafe ? "path resolves outside the repository" : null);
+    if (reason) { if (excluded.length < EXCLUSION_LIMIT) excluded.push({ path: filePath, reason }); } else allowed.push(filePath);
+  }
+  let output = Buffer.alloc(0);
+  let truncated = false;
+  if (allowed.length > 0) {
+    try {
+      const result = await execFileAsync("git", ["-C", repositoryPath, "diff", "HEAD", "--", ...allowed], { maxBuffer: Math.max(DIFF_LIMIT * 2, 256 * 1024), encoding: "buffer" });
+      output = Buffer.from(result.stdout);
+    } catch (error) {
+      const partial = (error as { stdout?: Buffer | string }).stdout;
+      if (partial !== undefined) { output = Buffer.from(partial); truncated = true; } else throw error;
+    }
+  }
+  if (output.byteLength > DIFF_LIMIT) { output = output.subarray(0, DIFF_LIMIT); truncated = true; }
+  const content = output.toString("utf8").replace(/\uFFFD(?=[^\n]*$)/, "");
+  return { path: ".", title: "Working tree diff", source: "git-diff", basis: "HEAD working tree", content: content || "No included tracked changes in the working tree.", truncated, generatedAt, excluded };
 }
 
 export function repositoryItem(repositoryPath: string): RepositorySearchItem {

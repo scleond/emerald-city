@@ -66,7 +66,23 @@ describe("repository snapshots", () => {
     await fs.writeFile(path.join(directory, "README.md"), "before\n"); execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]);
     await fs.writeFile(path.join(directory, "README.md"), "after\n");
     const evidence = await gitDiffEvidence(directory, "2026-01-01T00:00:00.000Z");
-    expect(evidence).toMatchObject({ source: "git-diff", truncated: false, generatedAt: "2026-01-01T00:00:00.000Z" });
+    expect(evidence).toMatchObject({ source: "git-diff", basis: "HEAD working tree", truncated: false, generatedAt: "2026-01-01T00:00:00.000Z", excluded: [] });
     expect(evidence.content).toContain("-before"); expect(evidence.content).toContain("+after"); expect(diffEvidenceText(evidence)).toContain("Source: git-diff");
+  });
+
+  it("excludes changed secrets, generated files, binaries, and escaping symlinks with reasons", async () => {
+    const directory = await repository(); const outside = await fs.mkdtemp(path.join(os.tmpdir(), "context-shelf-outside-")); temporary.push(outside);
+    await fs.writeFile(path.join(directory, "safe.md"), "safe\n"); await fs.writeFile(path.join(directory, "passwords.txt"), "secret\n"); await fs.mkdir(path.join(directory, "generated")); await fs.writeFile(path.join(directory, "generated/out.md"), "generated\n"); await fs.writeFile(path.join(outside, "outside.md"), "outside\n");
+    try { await fs.symlink(path.join(outside, "outside.md"), path.join(directory, "escape.md")); } catch { return; }
+    execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]);
+    await fs.writeFile(path.join(directory, "safe.md"), "changed\n"); await fs.writeFile(path.join(directory, "passwords.txt"), "new secret\n"); await fs.writeFile(path.join(directory, "generated/out.md"), "new generated\n");
+    const evidence = await gitDiffEvidence(directory);
+    expect(evidence.content).toContain("+changed"); expect(evidence.content).not.toContain("secret"); expect(evidence.content).not.toContain("generated"); expect(evidence.excluded.map((item) => item.path)).toEqual(expect.arrayContaining(["passwords.txt", "generated/out.md", "escape.md"]));
+    expect(diffEvidenceText(evidence)).toContain("Excluded paths:");
+  });
+
+  it("bounds multibyte diff output and reports truncation", async () => {
+    const directory = await repository(); const initial = "界".repeat(20_000); await fs.writeFile(path.join(directory, "README.md"), initial); execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]); await fs.writeFile(path.join(directory, "README.md"), "界".repeat(20_000) + "changed");
+    const evidence = await gitDiffEvidence(directory); expect(evidence.truncated).toBe(true); expect(Buffer.byteLength(evidence.content)).toBeLessThanOrEqual(32_000); expect(evidence.content).not.toContain("�");
   });
 });
