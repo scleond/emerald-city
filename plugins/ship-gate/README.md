@@ -17,3 +17,8 @@ Conflict-marker checks inspect Git's `ls-files --others --ignored --exclude-stan
 listing, so ignored untracked files are covered. Dependency, generated, and
 secret-like paths are excluded; enumeration and prefix reads are bounded by
 file count, total bytes, output size, timeout, and cancellation.
+
+Filesystem cancellation is cooperative: the scanner checks the signal before
+each entry and bounded file read. An OS read already in progress cannot be
+interrupted portably, but no later read is scheduled and the final report is
+marked cancelled when cancellation is observed.
