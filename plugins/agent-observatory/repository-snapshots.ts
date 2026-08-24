@@ -33,6 +33,17 @@ function isMaxBufferError(error: unknown) {
   const candidate = error as { code?: string; message?: string };
   return candidate.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" || candidate.message?.includes("maxBuffer") === true;
 }
+export function binaryPathsFromNumstat(value: string) {
+  const records = value.split("\0"); const paths = new Set<string>();
+  for (let index = 0; index < records.length; index += 1) {
+    const fields = records[index].split("\t");
+    if (fields.length < 3 || fields[0] !== "-" || fields[1] !== "-") continue;
+    paths.add(fields.slice(2).join("\t"));
+    const renameSource = records[index + 1];
+    if (renameSource && !renameSource.includes("\t")) { paths.add(renameSource); index += 1; }
+  }
+  return paths;
+}
 
 export async function trackedDocumentPaths(repositoryPath: string): Promise<string[]> {
   const { stdout } = await execFileAsync("git", ["-C", repositoryPath, "ls-files", "-z"], { maxBuffer: 2_000_000 });
@@ -79,14 +90,20 @@ export function diffEvidenceText(evidence: RepositoryDiffEvidence) {
 
 export async function gitDiffEvidence(repositoryPath: string, generatedAt = new Date().toISOString()): Promise<RepositoryDiffEvidence> {
   const root = await fs.realpath(repositoryPath);
-  const [{ stdout: names }, { stdout: numstat }] = await Promise.all([
+  const [{ stdout: names }, { stdout: numstat }, { stdout: nameStatus }] = await Promise.all([
     execFileAsync("git", ["-C", repositoryPath, "diff", "--name-only", "-z", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 }),
-    execFileAsync("git", ["-C", repositoryPath, "diff", "--numstat", "-z", "--format=", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 }),
+    // Disable rename collapsing for classification: this gives us both binary endpoints.
+    execFileAsync("git", ["-C", repositoryPath, "diff", "--no-renames", "--numstat", "-z", "--format=", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 }),
+    execFileAsync("git", ["-C", repositoryPath, "diff", "--name-status", "-z", "--find-renames", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 }),
   ]);
-  const binaryPaths = new Set(numstat.toString().split("\0").flatMap((record) => {
-    const fields = record.split("\t");
-    return fields.length >= 3 && fields[0] === "-" && fields[1] === "-" ? [fields.slice(2).join("\t")] : [];
-  }));
+  const binaryPaths = binaryPathsFromNumstat(numstat.toString());
+  const statusRecords = nameStatus.toString().split("\0");
+  for (let index = 0; index < statusRecords.length; index += 1) {
+    const status = statusRecords[index];
+    if (!/^R\d+$/.test(status)) continue;
+    const oldPath = statusRecords[index + 1]; const newPath = statusRecords[index + 2];
+    if (oldPath && newPath && (binaryPaths.has(oldPath) || binaryPaths.has(newPath))) { binaryPaths.add(oldPath); binaryPaths.add(newPath); index += 2; }
+  }
   const excluded: RepositoryDiffExclusion[] = [];
   const allowed: string[] = [];
   for (const filePath of names.toString().split("\0").filter(Boolean)) {

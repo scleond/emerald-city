@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { diffEvidenceText, gitDiffEvidence, repositoryItem, searchRepository, SNAPSHOT_LIMIT, snapshotText } from "./repository-snapshots";
+import { binaryPathsFromNumstat, diffEvidenceText, gitDiffEvidence, repositoryItem, searchRepository, SNAPSHOT_LIMIT, snapshotText } from "./repository-snapshots";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
@@ -99,5 +99,15 @@ describe("repository snapshots", () => {
   it("does not turn non-buffer subprocess errors into evidence", async () => {
     const directory = await repository(); await fs.writeFile(path.join(directory, "README.md"), "content\n"); execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]);
     await expect(gitDiffEvidence(path.join(directory, "missing-repository"))).rejects.toBeTruthy();
+  });
+
+  it("excludes both endpoints of a binary rename", async () => {
+    const directory = await repository(); const oldPath = path.join(directory, "image.md"); const newPath = path.join(directory, "renamed.md");
+    await fs.writeFile(oldPath, Buffer.from([0, 1, 2, 3, 4])); execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]);
+    execFileSync("git", ["-C", directory, "mv", "image.md", "renamed.md"]);
+    const evidence = await gitDiffEvidence(directory);
+    expect(evidence.content).not.toContain("image.md"); expect(evidence.content).not.toContain("renamed.md");
+    expect(evidence.excluded).toEqual(expect.arrayContaining([{ path: "renamed.md", reason: "binary file content" }]));
+    expect([...binaryPathsFromNumstat("-\t-\trenamed.md\0image.md\0")]).toEqual(["renamed.md", "image.md"]);
   });
 });
