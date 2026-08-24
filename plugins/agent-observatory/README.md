@@ -198,5 +198,22 @@ exclusion, usage bars, attention queue, detail, and wide/compact + light/dark ve
 The plugin contributes a **Repository context** attachment source. It lists Git
 repositories for explicit selection when no workspace is active, then searches
 tracked documents and text files by path or title. Results are immutable,
-bounded snapshots with source, generation, and truncation metadata. Secret-like
-paths and generated/dependency directories are excluded.
+bounded snapshots with source, generation, and truncation metadata. Before an
+item is returned to the composer, its text is previewed and bounded to 32,000
+UTF-8 bytes and 400 lines; the returned `text` is the complete point-in-time
+attachment payload, not a live file reference. The current working-tree diff is
+offered as Git evidence with its `HEAD working tree` basis and an explicit list
+of excluded paths. Secret-like paths and generated/dependency directories are
+excluded. When no workspace context is available, the first result is an
+explicit repository selection item; content is not searched until that item is
+selected.
+
+### Context Shelf qualification
+
+The attachment flow is qualified by `repository-snapshots.test.ts`: it covers
+tracked-file search, explicit repository selection, UTF-8-safe byte and line
+preview bounds, immutable generated text, diff provenance, exclusion reasons,
+binary detection, and escaping symlinks. Run `npm test` and `npm run typecheck`
+from this directory. The native panel uses the Paseo theme palette throughout
+and derives compact spacing/layout from `layout.compact`; verify the attachment
+picker and panel at wide and compact widths in both light and dark themes.

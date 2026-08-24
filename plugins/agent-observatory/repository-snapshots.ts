@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 export const SNAPSHOT_LIMIT = 32_000;
+export const SNAPSHOT_LINE_LIMIT = 400;
 export const DIFF_LIMIT = 32_000;
 const EXCLUSION_LIMIT = 100;
 const DOCUMENT_EXTENSIONS = new Set([".md", ".mdx", ".txt", ".rst", ".adoc", ".json", ".yaml", ".yml", ".toml", ".ts", ".tsx", ".js", ".jsx", ".css", ".scss", ".html", ".xml", ".csv"]);
@@ -16,6 +17,24 @@ export interface RepositorySnapshot { path: string; title: string; source: "trac
 export interface RepositoryDiffExclusion { path: string; reason: string; }
 export interface RepositoryDiffEvidence { path: string; title: string; source: "git-diff"; basis: "HEAD working tree"; content: string; truncated: boolean; generatedAt: string; excluded: RepositoryDiffExclusion[]; }
 export interface RepositorySearchItem { id: string; identifier: string; title: string; subtitle?: string; url: string; text: string; resourceType: "repository-snapshot" | "repository"; }
+export interface AttachmentPreview { text: string; byteLength: number; lineCount: number; truncated: boolean; }
+
+function boundedText(value: string, byteLimit: number, lineLimit: number): AttachmentPreview {
+  const lines = value.split("\n");
+  let text = lines.slice(0, lineLimit).join("\n");
+  let truncated = lines.length > lineLimit;
+  while (Buffer.byteLength(text, "utf8") > byteLimit) {
+    truncated = true;
+    const bytes = Buffer.from(text, "utf8").subarray(0, byteLimit);
+    text = bytes.toString("utf8").replace(/\uFFFD$/, "");
+  }
+  return { text, byteLength: Buffer.byteLength(text, "utf8"), lineCount: text ? text.split("\n").length : 0, truncated };
+}
+
+/** Creates the exact, bounded text that will be copied into a composer attachment. */
+export function previewAttachment(text: string, byteLimit = SNAPSHOT_LIMIT, lineLimit = SNAPSHOT_LINE_LIMIT): AttachmentPreview {
+  return boundedText(text, byteLimit, lineLimit);
+}
 
 export function exclusionReason(filePath: string): string | null {
   const parts = filePath.split(/[\\/]/);
@@ -73,19 +92,19 @@ export async function searchRepository(repositoryPath: string, query: string, ge
     if (normalized && !relativePath.toLowerCase().includes(normalized) && !title.toLowerCase().includes(normalized)) continue;
     const raw = await safeRead(repositoryPath, relativePath);
     if (raw === null) continue;
-    const truncated = raw.length > SNAPSHOT_LIMIT;
-    results.push({ path: relativePath, title, source: "tracked", content: raw.slice(0, SNAPSHOT_LIMIT), truncated, generatedAt });
+    const preview = previewAttachment(raw);
+    results.push({ path: relativePath, title, source: "tracked", content: preview.text, truncated: preview.truncated, generatedAt });
   }
   return results;
 }
 
 export function snapshotText(snapshot: RepositorySnapshot) {
-  return [`# ${snapshot.title}`, `Source: ${snapshot.source} file ${snapshot.path}`, `Generated: ${snapshot.generatedAt}`, `Truncated: ${snapshot.truncated ? "yes" : "no"}`, "", snapshot.content].join("\n");
+  return previewAttachment([`# ${snapshot.title}`, `Source: ${snapshot.source} file ${snapshot.path}`, `Generated: ${snapshot.generatedAt}`, `Truncated: ${snapshot.truncated ? "yes" : "no"}`, "", snapshot.content].join("\n")).text;
 }
 
 export function diffEvidenceText(evidence: RepositoryDiffEvidence) {
   const exclusions = evidence.excluded.length === 0 ? "None" : evidence.excluded.map(({ path: filePath, reason }) => `- ${filePath}: ${reason}`).join("\n");
-  return [`# ${evidence.title}`, `Source: ${evidence.source}`, `Basis: ${evidence.basis}`, `Generated: ${evidence.generatedAt}`, `Truncated: ${evidence.truncated ? "yes" : "no"}`, "Excluded paths:", exclusions, "", evidence.content].join("\n");
+  return previewAttachment([`# ${evidence.title}`, `Source: ${evidence.source}`, `Basis: ${evidence.basis}`, `Generated: ${evidence.generatedAt}`, `Truncated: ${evidence.truncated ? "yes" : "no"}`, "Excluded paths:", exclusions, "", evidence.content].join("\n")).text;
 }
 
 export async function gitDiffEvidence(repositoryPath: string, generatedAt = new Date().toISOString()): Promise<RepositoryDiffEvidence> {

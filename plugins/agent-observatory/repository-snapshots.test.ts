@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { binaryPathsFromNumstat, diffEvidenceText, gitDiffEvidence, repositoryItem, searchRepository, SNAPSHOT_LIMIT, snapshotText } from "./repository-snapshots";
+import { binaryPathsFromNumstat, diffEvidenceText, gitDiffEvidence, previewAttachment, repositoryItem, searchRepository, SNAPSHOT_LIMIT, SNAPSHOT_LINE_LIMIT, snapshotText } from "./repository-snapshots";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });
@@ -11,6 +11,15 @@ afterEach(async () => { await Promise.all(temporary.splice(0).map((directory) =>
 async function repository() { const directory = await fs.mkdtemp(path.join(os.tmpdir(), "context-shelf-")); temporary.push(directory); execFileSync("git", ["init", "-q", directory]); return directory; }
 
 describe("repository snapshots", () => {
+  it("previews the exact attachment with byte and line bounds", () => {
+    const preview = previewAttachment(`${"界".repeat(100)}\nsecond\nthird`, 64, 2);
+    expect(preview.truncated).toBe(true);
+    expect(preview.lineCount).toBe(1);
+    expect(preview.byteLength).toBeLessThanOrEqual(64);
+    expect(preview.text).not.toContain("�");
+    expect(previewAttachment("a\n".repeat(SNAPSHOT_LINE_LIMIT + 1)).lineCount).toBe(SNAPSHOT_LINE_LIMIT);
+  });
+
   it("searches tracked documents by path or title and excludes secrets", async () => {
     const directory = await repository();
     await fs.mkdir(path.join(directory, "docs"));
