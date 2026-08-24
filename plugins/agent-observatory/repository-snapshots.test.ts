@@ -110,4 +110,13 @@ describe("repository snapshots", () => {
     expect(evidence.excluded).toEqual(expect.arrayContaining([{ path: "renamed.md", reason: "binary file content" }]));
     expect([...binaryPathsFromNumstat("-\t-\trenamed.md\0image.md\0")]).toEqual(["renamed.md", "image.md"]);
   });
+
+  it("propagates exclusions across a secret-to-safe rename", async () => {
+    const directory = await repository();
+    await fs.writeFile(path.join(directory, "passwords.json"), "TOP-SECRET-CONTENT\n"); execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]);
+    execFileSync("git", ["-C", directory, "mv", "passwords.json", "config.json"]); await fs.writeFile(path.join(directory, "config.json"), "TOP-SECRET-CONTENT\nnew\n");
+    const evidence = await gitDiffEvidence(directory);
+    expect(evidence.content).not.toContain("TOP-SECRET-CONTENT");
+    expect(evidence.excluded).toEqual(expect.arrayContaining([{ path: "passwords.json", reason: "secret-like filename: passwords.json" }, { path: "config.json", reason: "secret-like filename: passwords.json" }]));
+  });
 });

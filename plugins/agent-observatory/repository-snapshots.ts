@@ -97,17 +97,22 @@ export async function gitDiffEvidence(repositoryPath: string, generatedAt = new 
     execFileAsync("git", ["-C", repositoryPath, "diff", "--name-status", "-z", "--find-renames", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 }),
   ]);
   const binaryPaths = binaryPathsFromNumstat(numstat.toString());
+  const renameExclusions = new Map<string, string>();
   const statusRecords = nameStatus.toString().split("\0");
   for (let index = 0; index < statusRecords.length; index += 1) {
     const status = statusRecords[index];
     if (!/^R\d+$/.test(status)) continue;
     const oldPath = statusRecords[index + 1]; const newPath = statusRecords[index + 2];
-    if (oldPath && newPath && (binaryPaths.has(oldPath) || binaryPaths.has(newPath))) { binaryPaths.add(oldPath); binaryPaths.add(newPath); index += 2; }
+    if (!oldPath || !newPath) continue;
+    const reason = exclusionReason(oldPath) ?? exclusionReason(newPath) ?? (!recognized(oldPath) || !recognized(newPath) ? "unsupported or binary file type" : null);
+    if (reason) { renameExclusions.set(oldPath, reason); renameExclusions.set(newPath, reason); }
+    if (binaryPaths.has(oldPath) || binaryPaths.has(newPath)) { binaryPaths.add(oldPath); binaryPaths.add(newPath); }
+    index += 2;
   }
   const excluded: RepositoryDiffExclusion[] = [];
   const allowed: string[] = [];
   for (const filePath of names.toString().split("\0").filter(Boolean)) {
-    const policyReason = exclusionReason(filePath) ?? (binaryPaths.has(filePath) ? "binary file content" : (!recognized(filePath) ? "unsupported or binary file type" : null));
+    const policyReason = renameExclusions.get(filePath) ?? exclusionReason(filePath) ?? (binaryPaths.has(filePath) ? "binary file content" : (!recognized(filePath) ? "unsupported or binary file type" : null));
     const candidate = path.resolve(root, filePath);
     let unsafe = false;
     try {
@@ -120,6 +125,7 @@ export async function gitDiffEvidence(repositoryPath: string, generatedAt = new 
     const reason = policyReason ?? (unsafe ? "path resolves outside the repository" : null);
     if (reason) { if (excluded.length < EXCLUSION_LIMIT) excluded.push({ path: filePath, reason }); } else allowed.push(filePath);
   }
+  for (const [filePath, reason] of renameExclusions) if (!excluded.some((item) => item.path === filePath) && excluded.length < EXCLUSION_LIMIT) excluded.push({ path: filePath, reason });
   let output = Buffer.alloc(0);
   let truncated = false;
   if (allowed.length > 0) {
