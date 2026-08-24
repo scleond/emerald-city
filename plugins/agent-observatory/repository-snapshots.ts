@@ -54,6 +54,14 @@ function lineCount(value: string): number {
   return count;
 }
 
+function decodeCompleteUtf8Prefix(buffer: Buffer): string {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  for (let end = buffer.length; end >= Math.max(0, buffer.length - 3); end -= 1) {
+    try { return decoder.decode(buffer.subarray(0, end)); } catch { /* trim an incomplete trailing sequence */ }
+  }
+  return "";
+}
+
 function fitMetadata(value: string, byteLimit: number): string {
   const chunks: string[] = [];
   let bytes = 0;
@@ -84,7 +92,10 @@ function renderAttachment(metadata: string[], content: string, inputTruncated: b
   const rendered = `${renderedMetadata.join("\n")}\n\n${contentPreview.text}`;
   // The conservative metadata budget above makes this true; retain a total fallback for future callers.
   if (Buffer.byteLength(rendered, "utf8") <= SNAPSHOT_LIMIT && lineCount(rendered) <= SNAPSHOT_LINE_LIMIT) return rendered;
-  return `${fitUtf8(safeMetadata[0] ?? "Source: unknown", 512)}\nGenerated: unavailable\nTruncated: yes\n\n${boundedText(content, SNAPSHOT_LIMIT - 64, SNAPSHOT_LINE_LIMIT - 4).text}`;
+  const fallbackMetadata = "Source: unknown\nGenerated: unavailable\nTruncated: yes";
+  const fallbackBytes = Buffer.byteLength(fallbackMetadata, "utf8") + 2;
+  const fallbackContent = boundedText(content, SNAPSHOT_LIMIT - fallbackBytes, SNAPSHOT_LINE_LIMIT - 4);
+  return `${fallbackMetadata}\n\n${fallbackContent.text}`;
 }
 
 /** Creates the exact, bounded text that will be copied into a composer attachment. */
@@ -125,7 +136,7 @@ export async function trackedDocumentPaths(repositoryPath: string): Promise<stri
   return stdout.split("\0").filter(Boolean).filter(recognized).sort();
 }
 
-async function safeRead(repositoryPath: string, relativePath: string): Promise<string | null> {
+async function safeRead(repositoryPath: string, relativePath: string): Promise<{ text: string; truncated: boolean } | null> {
   const root = await fs.realpath(repositoryPath);
   const candidate = path.resolve(root, relativePath);
   const relative = path.relative(root, candidate);
@@ -138,7 +149,7 @@ async function safeRead(repositoryPath: string, relativePath: string): Promise<s
     try {
       const buffer = Buffer.allocUnsafe(SNAPSHOT_LIMIT + 1);
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-      return buffer.subarray(0, bytesRead).toString("utf8");
+      return { text: decodeCompleteUtf8Prefix(buffer.subarray(0, bytesRead)), truncated: bytesRead === buffer.length };
     } finally {
       await handle.close();
     }
@@ -155,8 +166,8 @@ export async function searchRepository(repositoryPath: string, query: string, ge
     if (normalized && !relativePath.toLowerCase().includes(normalized) && !title.toLowerCase().includes(normalized)) continue;
     const raw = await safeRead(repositoryPath, relativePath);
     if (raw === null) continue;
-    const preview = previewAttachment(raw);
-    results.push({ path: relativePath, title, source: "tracked", content: preview.text, truncated: preview.truncated, generatedAt });
+    const preview = previewAttachment(raw.text);
+    results.push({ path: relativePath, title, source: "tracked", content: preview.text, truncated: raw.truncated || preview.truncated, generatedAt });
   }
   return results;
 }

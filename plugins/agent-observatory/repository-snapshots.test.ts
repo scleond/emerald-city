@@ -92,6 +92,24 @@ describe("repository snapshots", () => {
     expect(snapshot.content).not.toContain("�");
   });
 
+  it("does not decode a partial four-byte sequence at the bounded read boundary", async () => {
+    const directory = await repository();
+    await fs.writeFile(path.join(directory, "boundary.md"), "a".repeat(SNAPSHOT_LIMIT - 2) + "😀tail");
+    execFileSync("git", ["-C", directory, "add", "."]);
+    const snapshot = (await searchRepository(directory, "boundary"))[0];
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.content).not.toContain("�");
+    expect(snapshot.content.endsWith("😀")).toBe(false);
+  });
+
+  it("keeps the final formatter fallback envelope bounded", () => {
+    const text = snapshotText({ path: "p".repeat(200_000), title: "t".repeat(200_000), source: "tracked", content: "界".repeat(200_000), truncated: false, generatedAt: "g".repeat(200_000) });
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(SNAPSHOT_LIMIT);
+    expect(text.split("\n").length).toBeLessThanOrEqual(SNAPSHOT_LINE_LIMIT);
+    expect(text).toContain("Source:");
+    expect(text).toContain("Truncated:");
+  });
+
   it("searches tracked documents by path or title and excludes secrets", async () => {
     const directory = await repository();
     await fs.mkdir(path.join(directory, "docs"));
