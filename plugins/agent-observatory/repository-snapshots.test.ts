@@ -61,6 +61,37 @@ describe("repository snapshots", () => {
     expect(text.split("\n").length).toBeLessThanOrEqual(SNAPSHOT_LINE_LIMIT);
   });
 
+  it("sanitizes newline-bearing provenance fields without losing required labels", () => {
+    const snapshot = snapshotText({ path: "docs/evil\npath.md", title: "title\r\n", source: "tracked", content: "", truncated: false, generatedAt: "2026\n-01" });
+    expect(snapshot).toContain("Source: tracked file");
+    expect(snapshot).toContain("Generated: 2026\\u000a-01");
+    expect(snapshot).toContain("Truncated: yes");
+    const diff = diffEvidenceText({ path: ".", title: "diff\n", source: "git-diff", basis: "HEAD working tree", content: "", truncated: false, generatedAt: "now", excluded: [{ path: "bad\nsecret", reason: "reason\r\n" }] });
+    expect(diff).toContain("Source: git-diff");
+    expect(diff).toContain("Basis: HEAD working tree");
+    expect(diff).toContain("Excluded paths:");
+  });
+
+  it("summarizes huge exclusion arrays incrementally", () => {
+    const exclusions = Array.from({ length: 100_000 }, (_, index) => ({ path: `p${index}\n${"x".repeat(500)}`, reason: "r".repeat(500) }));
+    const text = diffEvidenceText({ path: ".", title: "diff", source: "git-diff", basis: "HEAD working tree", content: "", truncated: false, generatedAt: "now", excluded: exclusions });
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(SNAPSHOT_LIMIT);
+    expect(text).toContain("Source: git-diff");
+    expect(text).toContain("Basis: HEAD working tree");
+    expect(text).toContain("additional exclusions omitted");
+    expect(text).toContain("Truncated: yes");
+  });
+
+  it("previews oversized tracked files without reading the entire file", async () => {
+    const directory = await repository();
+    await fs.writeFile(path.join(directory, "large.md"), "界".repeat(SNAPSHOT_LIMIT * 4));
+    execFileSync("git", ["-C", directory, "add", "."]);
+    const snapshot = (await searchRepository(directory, "large", "2026-01-01T00:00:00.000Z"))[0];
+    expect(snapshot.truncated).toBe(true);
+    expect(Buffer.byteLength(snapshot.content, "utf8")).toBeLessThanOrEqual(SNAPSHOT_LIMIT);
+    expect(snapshot.content).not.toContain("�");
+  });
+
   it("searches tracked documents by path or title and excludes secrets", async () => {
     const directory = await repository();
     await fs.mkdir(path.join(directory, "docs"));

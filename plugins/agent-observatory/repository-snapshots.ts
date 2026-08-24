@@ -41,9 +41,13 @@ function fitUtf8(value: string, byteLimit: number): string {
   return `${head}${marker}${tail}`;
 }
 
+function sanitizeMetadata(value: string): string {
+  return value.replace(/[\u0000-\u001F\u007F]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
+}
+
 function renderAttachment(metadata: string[], content: string, inputTruncated: boolean): string {
   // Keep labels/provenance visible even when paths, timestamps, or exclusion details are hostile.
-  const safeMetadata = metadata.map((line) => fitUtf8(line, 512));
+  const safeMetadata = metadata.map((line) => fitUtf8(sanitizeMetadata(line), 512));
   const metadataTruncated = safeMetadata.some((line, index) => line !== metadata[index]);
   const metadataWithoutFlag = [...safeMetadata, "Truncated: no"].join("\n");
   const metadataLines = metadataWithoutFlag.split("\n").length;
@@ -104,7 +108,14 @@ async function safeRead(repositoryPath: string, relativePath: string): Promise<s
     const target = await fs.realpath(candidate);
     const targetRelative = path.relative(root, target);
     if (targetRelative.startsWith(`..${path.sep}`) || path.isAbsolute(targetRelative)) return null;
-    return await fs.readFile(target, "utf8");
+    const handle = await fs.open(target, "r");
+    try {
+      const buffer = Buffer.allocUnsafe(SNAPSHOT_LIMIT + 1);
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      return buffer.subarray(0, bytesRead).toString("utf8");
+    } finally {
+      await handle.close();
+    }
   } catch {
     return null;
   }
@@ -129,7 +140,21 @@ export function snapshotText(snapshot: RepositorySnapshot) {
 }
 
 export function diffEvidenceText(evidence: RepositoryDiffEvidence) {
-  const exclusions = evidence.excluded.length === 0 ? "None" : evidence.excluded.map(({ path: filePath, reason }) => `- ${filePath}: ${reason}`).join("\n");
+  let exclusions = "None";
+  if (evidence.excluded.length > 0) {
+    const lines: string[] = [];
+    let used = 0;
+    for (const exclusion of evidence.excluded) {
+      const line = `- ${exclusion.path}: ${exclusion.reason}`;
+      const next = used + Buffer.byteLength(line, "utf8") + (lines.length > 0 ? 1 : 0);
+      if (next > 8_000) break;
+      lines.push(line);
+      used = next;
+    }
+    const omitted = evidence.excluded.length - lines.length;
+    if (omitted > 0) lines.push(`… ${omitted} additional exclusions omitted`);
+    exclusions = lines.join("\n");
+  }
   return renderAttachment([`# ${evidence.title}`, `Source: ${evidence.source}`, `Basis: ${evidence.basis}`, `Generated: ${evidence.generatedAt}`, "Excluded paths:", exclusions], evidence.content, evidence.truncated);
 }
 
