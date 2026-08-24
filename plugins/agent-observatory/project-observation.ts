@@ -484,7 +484,7 @@ export class ProjectObservationController {
       const type = String(item.type ?? item.kind ?? "");
       const usage = item.usage && typeof item.usage === "object" ? item.usage as ObservatoryUsageFields : undefined;
       if (!usage || !["usage_updated", "turn_completed"].includes(type)) continue;
-      const event = normalizeUsageEvent({ type, turnId: item.turnId, model: item.model, canonicalModelId: item.canonicalModelId, provider: item.provider, displayName: item.displayName, usage, timestamp: entry.timestamp });
+      const event = normalizeUsageEvent({ type, turnId: item.turnId, model: item.model, canonicalModelId: item.canonicalModelId, provider: item.provider, displayName: item.displayName, costState: item.costState, usage, timestamp: entry.timestamp });
       if (!event) continue;
       const persistenceId = this.persistenceIdentity(agentId, event, event.model ?? this.agentModels.get(agentId) ?? null);
       this.usage.set(agentId, reduceAgentUsage(this.usage.get(agentId) ?? emptyAgentUsage(), event, this.agentModels.get(agentId) ?? null));
@@ -538,7 +538,7 @@ export class ProjectObservationController {
       model: event.model ?? fallbackModel, inputTokens: usage.inputTokens ?? null, cachedInputTokens: usage.cachedInputTokens ?? null,
       canonicalModelId: event.canonicalModelId ?? event.model ?? fallbackModel, provider: event.provider ?? null, displayName: event.displayName ?? event.model ?? fallbackModel,
       outputTokens: usage.outputTokens ?? null, contextUsedTokens: usage.contextWindowUsedTokens ?? null, contextMaxTokens: usage.contextWindowMaxTokens ?? null,
-      costUsd: usage.totalCostUsd ?? null, costState: usage.totalCostUsd === undefined ? "unknown" : "complete", confidence: event.kind === "final" ? "high" : "low",
+      costUsd: usage.totalCostUsd ?? null, costState: event.costState ?? (usage.totalCostUsd === undefined ? "unknown" : "complete"), confidence: event.kind === "final" ? "high" : "low",
     };
     try { await this.usageStore.put(turn); } catch { /* invalid records are ignored */ }
   }
