@@ -29,6 +29,10 @@ export function exclusionReason(filePath: string): string | null {
 }
 function excluded(filePath: string) { return exclusionReason(filePath) !== null; }
 function recognized(filePath: string) { return DOCUMENT_EXTENSIONS.has(path.extname(filePath).toLowerCase()) && !excluded(filePath); }
+function isMaxBufferError(error: unknown) {
+  const candidate = error as { code?: string; message?: string };
+  return candidate.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" || candidate.message?.includes("maxBuffer") === true;
+}
 
 export async function trackedDocumentPaths(repositoryPath: string): Promise<string[]> {
   const { stdout } = await execFileAsync("git", ["-C", repositoryPath, "ls-files", "-z"], { maxBuffer: 2_000_000 });
@@ -75,11 +79,18 @@ export function diffEvidenceText(evidence: RepositoryDiffEvidence) {
 
 export async function gitDiffEvidence(repositoryPath: string, generatedAt = new Date().toISOString()): Promise<RepositoryDiffEvidence> {
   const root = await fs.realpath(repositoryPath);
-  const { stdout: names } = await execFileAsync("git", ["-C", repositoryPath, "diff", "--name-only", "-z", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 });
+  const [{ stdout: names }, { stdout: numstat }] = await Promise.all([
+    execFileAsync("git", ["-C", repositoryPath, "diff", "--name-only", "-z", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 }),
+    execFileAsync("git", ["-C", repositoryPath, "diff", "--numstat", "-z", "--format=", "HEAD", "--", "."], { maxBuffer: 8 * 1024 * 1024 }),
+  ]);
+  const binaryPaths = new Set(numstat.toString().split("\0").flatMap((record) => {
+    const fields = record.split("\t");
+    return fields.length >= 3 && fields[0] === "-" && fields[1] === "-" ? [fields.slice(2).join("\t")] : [];
+  }));
   const excluded: RepositoryDiffExclusion[] = [];
   const allowed: string[] = [];
   for (const filePath of names.toString().split("\0").filter(Boolean)) {
-    const policyReason = exclusionReason(filePath) ?? (!recognized(filePath) ? "unsupported or binary file type" : null);
+    const policyReason = exclusionReason(filePath) ?? (binaryPaths.has(filePath) ? "binary file content" : (!recognized(filePath) ? "unsupported or binary file type" : null));
     const candidate = path.resolve(root, filePath);
     let unsafe = false;
     try {
@@ -100,7 +111,7 @@ export async function gitDiffEvidence(repositoryPath: string, generatedAt = new 
       output = Buffer.from(result.stdout);
     } catch (error) {
       const partial = (error as { stdout?: Buffer | string }).stdout;
-      if (partial !== undefined) { output = Buffer.from(partial); truncated = true; } else throw error;
+      if (isMaxBufferError(error) && partial !== undefined) { output = Buffer.from(partial); truncated = true; } else throw error;
     }
   }
   if (output.byteLength > DIFF_LIMIT) { output = output.subarray(0, DIFF_LIMIT); truncated = true; }

@@ -85,4 +85,19 @@ describe("repository snapshots", () => {
     const directory = await repository(); const initial = "界".repeat(20_000); await fs.writeFile(path.join(directory, "README.md"), initial); execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]); await fs.writeFile(path.join(directory, "README.md"), "界".repeat(20_000) + "changed");
     const evidence = await gitDiffEvidence(directory); expect(evidence.truncated).toBe(true); expect(Buffer.byteLength(evidence.content)).toBeLessThanOrEqual(32_000); expect(evidence.content).not.toContain("�");
   });
+
+  it("excludes changed and deleted binary content even with text-like extensions", async () => {
+    const directory = await repository();
+    await fs.writeFile(path.join(directory, "changed.md"), Buffer.from([0, 1, 2, 3])); await fs.writeFile(path.join(directory, "deleted.json"), Buffer.from([0, 4, 5, 6]));
+    execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]);
+    await fs.writeFile(path.join(directory, "changed.md"), Buffer.from([0, 7, 8, 9])); await fs.rm(path.join(directory, "deleted.json"));
+    const evidence = await gitDiffEvidence(directory);
+    expect(evidence.content).not.toContain("changed.md"); expect(evidence.content).not.toContain("deleted.json");
+    expect(evidence.excluded).toEqual(expect.arrayContaining([{ path: "changed.md", reason: "binary file content" }, { path: "deleted.json", reason: "binary file content" }]));
+  });
+
+  it("does not turn non-buffer subprocess errors into evidence", async () => {
+    const directory = await repository(); await fs.writeFile(path.join(directory, "README.md"), "content\n"); execFileSync("git", ["-C", directory, "add", "."]); execFileSync("git", ["-C", directory, "commit", "-qm", "initial"]);
+    await expect(gitDiffEvidence(path.join(directory, "missing-repository"))).rejects.toBeTruthy();
+  });
 });
