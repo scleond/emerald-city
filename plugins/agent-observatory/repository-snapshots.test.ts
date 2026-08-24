@@ -38,6 +38,29 @@ describe("repository snapshots", () => {
     expect(text).toContain("Truncated: yes");
   });
 
+  it("never throws for adversarial snapshot metadata or empty content", () => {
+    const text = snapshotText({ path: "p".repeat(100_000), title: "界".repeat(100_000), source: "tracked", content: "", truncated: false, generatedAt: "2026-".repeat(100_000) });
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(SNAPSHOT_LIMIT);
+    expect(text.split("\n").length).toBeLessThanOrEqual(SNAPSHOT_LINE_LIMIT);
+    expect(text).toContain("Source: tracked file");
+    expect(text).toContain("Truncated: yes");
+  });
+
+  it("summarizes adversarial exclusion metadata without throwing", () => {
+    const text = diffEvidenceText({ path: ".", title: "diff", source: "git-diff", basis: "HEAD working tree", content: "", truncated: false, generatedAt: "g".repeat(100_000), excluded: Array.from({ length: 100 }, (_, index) => ({ path: `${index}-secret-${"x".repeat(10_000)}`, reason: "reason-".repeat(10_000) })) });
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(SNAPSHOT_LIMIT);
+    expect(text.split("\n").length).toBeLessThanOrEqual(SNAPSHOT_LINE_LIMIT);
+    expect(text).toContain("Source: git-diff");
+    expect(text).toContain("Basis: HEAD working tree");
+    expect(text).toContain("Truncated: yes");
+  });
+
+  it("handles exact byte and line limits", () => {
+    const text = snapshotText({ path: "p", title: "t", source: "tracked", content: "x".repeat(SNAPSHOT_LIMIT), truncated: false, generatedAt: "now" });
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(SNAPSHOT_LIMIT);
+    expect(text.split("\n").length).toBeLessThanOrEqual(SNAPSHOT_LINE_LIMIT);
+  });
+
   it("searches tracked documents by path or title and excludes secrets", async () => {
     const directory = await repository();
     await fs.mkdir(path.join(directory, "docs"));

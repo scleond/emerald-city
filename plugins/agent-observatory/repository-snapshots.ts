@@ -20,6 +20,7 @@ export interface RepositorySearchItem { id: string; identifier: string; title: s
 export interface AttachmentPreview { text: string; byteLength: number; lineCount: number; truncated: boolean; }
 
 function boundedText(value: string, byteLimit: number, lineLimit: number): AttachmentPreview {
+  if (byteLimit <= 0 || lineLimit <= 0) return { text: "", byteLength: 0, lineCount: 0, truncated: value.length > 0 };
   const lines = value.split("\n");
   let text = lines.slice(0, lineLimit).join("\n");
   let truncated = lines.length > lineLimit;
@@ -31,22 +32,29 @@ function boundedText(value: string, byteLimit: number, lineLimit: number): Attac
   return { text, byteLength: Buffer.byteLength(text, "utf8"), lineCount: text ? text.split("\n").length : 0, truncated };
 }
 
+function fitUtf8(value: string, byteLimit: number): string {
+  if (Buffer.byteLength(value, "utf8") <= byteLimit) return value;
+  const marker = "…";
+  const budget = Math.max(0, byteLimit - Buffer.byteLength(marker, "utf8"));
+  const head = Buffer.from(value, "utf8").subarray(0, Math.ceil(budget / 2)).toString("utf8").replace(/\uFFFD$/, "");
+  const tail = Buffer.from(value, "utf8").subarray(-Math.floor(budget / 2)).toString("utf8").replace(/^\uFFFD/, "");
+  return `${head}${marker}${tail}`;
+}
+
 function renderAttachment(metadata: string[], content: string, inputTruncated: boolean): string {
-  const metadataWithoutFlag = [...metadata, "Truncated: no"].join("\n");
+  // Keep labels/provenance visible even when paths, timestamps, or exclusion details are hostile.
+  const safeMetadata = metadata.map((line) => fitUtf8(line, 512));
+  const metadataTruncated = safeMetadata.some((line, index) => line !== metadata[index]);
+  const metadataWithoutFlag = [...safeMetadata, "Truncated: no"].join("\n");
   const metadataLines = metadataWithoutFlag.split("\n").length;
   const metadataBytes = Buffer.byteLength(metadataWithoutFlag, "utf8") + 2;
-  if (metadataBytes > SNAPSHOT_LIMIT || metadataLines >= SNAPSHOT_LINE_LIMIT) {
-    throw new Error("attachment metadata exceeds the composer snapshot limits");
-  }
   const contentPreview = boundedText(content, SNAPSHOT_LIMIT - metadataBytes - 2, SNAPSHOT_LINE_LIMIT - metadataLines - 2);
-  const truncated = inputTruncated || contentPreview.truncated;
-  const renderedMetadata = [...metadata, `Truncated: ${truncated ? "yes" : "no"}`];
+  const truncated = inputTruncated || metadataTruncated || contentPreview.truncated;
+  const renderedMetadata = [...safeMetadata, `Truncated: ${truncated ? "yes" : "no"}`];
   const rendered = `${renderedMetadata.join("\n")}\n\n${contentPreview.text}`;
-  // The truncation field is metadata and is deliberately rendered after the content budget is known.
-  if (Buffer.byteLength(rendered, "utf8") > SNAPSHOT_LIMIT || rendered.split("\n").length > SNAPSHOT_LINE_LIMIT) {
-    throw new Error("attachment metadata exceeds the composer snapshot limits");
-  }
-  return rendered;
+  // The conservative metadata budget above makes this true; retain a total fallback for future callers.
+  if (Buffer.byteLength(rendered, "utf8") <= SNAPSHOT_LIMIT && rendered.split("\n").length <= SNAPSHOT_LINE_LIMIT) return rendered;
+  return `${fitUtf8(safeMetadata[0] ?? "Source: unknown", 512)}\nGenerated: unavailable\nTruncated: yes\n\n${boundedText(content, SNAPSHOT_LIMIT - 64, SNAPSHOT_LINE_LIMIT - 4).text}`;
 }
 
 /** Creates the exact, bounded text that will be copied into a composer attachment. */
