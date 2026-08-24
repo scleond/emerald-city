@@ -22,33 +22,58 @@ export interface AttachmentPreview { text: string; byteLength: number; lineCount
 
 function boundedText(value: string, byteLimit: number, lineLimit: number): AttachmentPreview {
   if (byteLimit <= 0 || lineLimit <= 0) return { text: "", byteLength: 0, lineCount: 0, truncated: value.length > 0 };
-  const lines = value.split("\n");
-  let text = lines.slice(0, lineLimit).join("\n");
-  let truncated = lines.length > lineLimit;
-  while (Buffer.byteLength(text, "utf8") > byteLimit) {
-    truncated = true;
-    const bytes = Buffer.from(text, "utf8").subarray(0, byteLimit);
-    text = bytes.toString("utf8").replace(/\uFFFD$/, "");
+  const chunks: string[] = [];
+  let bytes = 0;
+  let lines = 1;
+  let index = 0;
+  let truncated = false;
+  while (index < value.length) {
+    const code = value.codePointAt(index)!;
+    const character = String.fromCodePoint(code);
+    const width = code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
+    if (bytes + width > byteLimit || (character === "\n" && lines >= lineLimit)) {
+      truncated = true;
+      break;
+    }
+    chunks.push(character);
+    bytes += width;
+    if (character === "\n") lines += 1;
+    index += character.length;
   }
-  return { text, byteLength: Buffer.byteLength(text, "utf8"), lineCount: text ? text.split("\n").length : 0, truncated };
+  return { text: chunks.join(""), byteLength: bytes, lineCount: chunks.length === 0 ? 0 : lines, truncated };
 }
 
 function fitUtf8(value: string, byteLimit: number): string {
-  if (Buffer.byteLength(value, "utf8") <= byteLimit) return value;
-  const marker = "…";
-  const budget = Math.max(0, byteLimit - Buffer.byteLength(marker, "utf8"));
-  const head = Buffer.from(value, "utf8").subarray(0, Math.ceil(budget / 2)).toString("utf8").replace(/\uFFFD$/, "");
-  const tail = Buffer.from(value, "utf8").subarray(-Math.floor(budget / 2)).toString("utf8").replace(/^\uFFFD/, "");
-  return `${head}${marker}${tail}`;
+  const preview = boundedText(value, byteLimit, Number.MAX_SAFE_INTEGER);
+  return preview.truncated ? `${preview.text}…` : preview.text;
 }
 
-function sanitizeMetadata(value: string): string {
-  return value.replace(/[\u0000-\u001F\u007F]/g, (character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`);
+function lineCount(value: string): number {
+  let count = value.length === 0 ? 0 : 1;
+  for (let index = 0; index < value.length; index += 1) if (value[index] === "\n") count += 1;
+  return count;
+}
+
+function fitMetadata(value: string, byteLimit: number): string {
+  const chunks: string[] = [];
+  let bytes = 0;
+  let index = 0;
+  while (index < value.length) {
+    const code = value.codePointAt(index)!;
+    const source = String.fromCodePoint(code);
+    const replacement = code <= 0x1f || code === 0x7f ? `\\u${code.toString(16).padStart(4, "0")}` : source;
+    const width = boundedText(replacement, Number.MAX_SAFE_INTEGER, 1).byteLength;
+    if (bytes + width > byteLimit) return `${chunks.join("")}…`;
+    chunks.push(replacement);
+    bytes += width;
+    index += source.length;
+  }
+  return chunks.join("");
 }
 
 function renderAttachment(metadata: string[], content: string, inputTruncated: boolean): string {
   // Keep labels/provenance visible even when paths, timestamps, or exclusion details are hostile.
-  const safeMetadata = metadata.map((line) => fitUtf8(sanitizeMetadata(line), 512));
+  const safeMetadata = metadata.map((line) => fitMetadata(line, 512));
   const metadataTruncated = safeMetadata.some((line, index) => line !== metadata[index]);
   const metadataWithoutFlag = [...safeMetadata, "Truncated: no"].join("\n");
   const metadataLines = metadataWithoutFlag.split("\n").length;
@@ -58,7 +83,7 @@ function renderAttachment(metadata: string[], content: string, inputTruncated: b
   const renderedMetadata = [...safeMetadata, `Truncated: ${truncated ? "yes" : "no"}`];
   const rendered = `${renderedMetadata.join("\n")}\n\n${contentPreview.text}`;
   // The conservative metadata budget above makes this true; retain a total fallback for future callers.
-  if (Buffer.byteLength(rendered, "utf8") <= SNAPSHOT_LIMIT && rendered.split("\n").length <= SNAPSHOT_LINE_LIMIT) return rendered;
+  if (Buffer.byteLength(rendered, "utf8") <= SNAPSHOT_LIMIT && lineCount(rendered) <= SNAPSHOT_LINE_LIMIT) return rendered;
   return `${fitUtf8(safeMetadata[0] ?? "Source: unknown", 512)}\nGenerated: unavailable\nTruncated: yes\n\n${boundedText(content, SNAPSHOT_LIMIT - 64, SNAPSHOT_LINE_LIMIT - 4).text}`;
 }
 
@@ -164,17 +189,15 @@ async function binaryGitPrefix(repositoryPath: string, filePath: string): Promis
 export function diffEvidenceText(evidence: RepositoryDiffEvidence) {
   let exclusions = "None";
   if (evidence.excluded.length > 0) {
-    const lines: string[] = [];
-    let used = 0;
+    const lines: string[] = [`Exclusions: ${evidence.excluded.length} total; bounded samples:`];
+    let used = Buffer.byteLength(lines[0], "utf8");
     for (const exclusion of evidence.excluded) {
-      const line = `- ${exclusion.path}: ${exclusion.reason}`;
-      const next = used + Buffer.byteLength(line, "utf8") + (lines.length > 0 ? 1 : 0);
+      const line = fitMetadata(`- ${exclusion.path}: ${exclusion.reason}`, 256);
+      const next = used + Buffer.byteLength(line, "utf8") + 1;
       if (next > 8_000) break;
       lines.push(line);
       used = next;
     }
-    const omitted = evidence.excluded.length - lines.length;
-    if (omitted > 0) lines.push(`… ${omitted} additional exclusions omitted`);
     exclusions = lines.join("\n");
   }
   return renderAttachment([`# ${evidence.title}`, `Source: ${evidence.source}`, `Basis: ${evidence.basis}`, `Generated: ${evidence.generatedAt}`, "Excluded paths:", exclusions], evidence.content, evidence.truncated);

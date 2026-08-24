@@ -78,7 +78,7 @@ describe("repository snapshots", () => {
     expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(SNAPSHOT_LIMIT);
     expect(text).toContain("Source: git-diff");
     expect(text).toContain("Basis: HEAD working tree");
-    expect(text).toContain("additional exclusions omitted");
+    expect(text).toContain("Exclusions: 100000 total");
     expect(text).toContain("Truncated: yes");
   });
 
