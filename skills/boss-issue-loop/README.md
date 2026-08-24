@@ -6,7 +6,7 @@ A reviewed GitHub issue loop: select scoped work, delegate implementation, verif
 
 - **`gh` CLI** — authenticated (`gh auth status`), with permission to read/write issues, labels, and comments on the target repository.
 - **An agent orchestrator** — Paseo (default) or Herdr. The adapter is resolved from `ORCHESTRATION.md` at runtime. A repository may override the adapter selection.
-- **Provider credentials** — at least one provider with a model capable of Tier 1 work. The skill escalates through capability tiers on failure; more tiers available means more recovery headroom.
+- **Provider credentials** — at least one provider with a model capable of Tier 1 work. The skill escalates through capability tiers on failure within the hard issue budgets defined in [`MODEL-SELECTION.md`](MODEL-SELECTION.md).
 
 ## Configuration levels
 
@@ -35,16 +35,25 @@ The adapter is loaded once per issue attempt and kept through implementation, re
 The loop provides these verification gates:
 
 1. **Implementation gate** — the implementer must pass repository verification commands and a handoff-verify command before the commit is accepted.
-2. **Independent review** — exactly two read-only reviewers run in parallel from different tiers. Both receive the fixed-point diff and issue specification. Hard defects require file/line evidence.
+2. **Adaptive independent review** — low-risk work receives one independent reviewer; medium- and high-risk work receives two, with protected auth, permissions, persistence, concurrency, lifecycle, migration, and public-interface changes always receiving two. Hard defects require file/line evidence.
 3. **Coordinator verification** — every claimed failure is verified by the coordinator. Actionable findings are resolved in the worktree, committed, and the verification gates are rerun.
 4. **Integration gate** — only a committed, linear, clean worktree with passing verification gates is integrated. Dirty or unverified worktrees are never integrated.
+
+The loop has hard bounds: one recovery prompt per writer, two writer launches
+per issue, two review rounds, and one reviewer replacement. Bounded findings
+resume the current writer with targeted re-review; a full fresh review follows
+only a material behavior change. Capability escalation preserves a clean
+worktree and commit by default, restarting from the accepted base only for
+corruption, invalid ancestry, or scope escape. The issue-agent concurrency
+bound is resolved from the same policy. See
+[`MODEL-SELECTION.md`](MODEL-SELECTION.md) for the authoritative policy.
 
 ## How the loop runs
 
 1. Select the first unblocked issue in scope and tracker order.
 2. Create an isolated worktree from the accepted base commit.
 3. Delegate implementation through the adapter.
-4. Launch two independent reviewers on the fixed-point diff.
+4. Classify review risk and launch the required number of distinct independent reviewers on the fixed-point diff, using the authoritative review-risk rule in [`MODEL-SELECTION.md`](MODEL-SELECTION.md).
 5. Verify findings, resolve defects, rerun gates.
 6. Integrate the verified commit, push, and close the issue.
 7. Archive completed agents and disposable workspaces.

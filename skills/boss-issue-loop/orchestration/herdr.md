@@ -51,8 +51,9 @@ instead of predicting them.
   dirty checkout in place and report it; use no forced removal. Herdr preserves
   the branch when it removes a worktree.
 
-Keep one writer per worktree, two reviewers, and three child agents total. Use
-unique names matching Herdr's `[a-z][a-z0-9_-]{0,31}` rule. Use explicit
+Enforce the issue-agent concurrency limit and resolve the reviewer count from
+`MODEL-SELECTION.md`. Use unique names matching Herdr's
+`[a-z][a-z0-9_-]{0,31}` rule. Use explicit
 workspace, pane, and agent targets; never rely on UI focus. Treat command
 failure, permission denial, unavailable provider kinds, or uncertain review
 isolation as an unsupported operation and return control to the core loop.

@@ -73,7 +73,7 @@ Given these three files:
 
 **Packaged** (always present):
 ```markdown
-## Difficulty rubric
+## Implementation difficulty rubric
 [default rubric — low/medium/high definitions]
 
 ## Capability tiers
@@ -101,7 +101,7 @@ Given these three files:
 
 | Section | Source used | Why |
 |---------|-------------|-----|
-| Difficulty rubric | Packaged | No user or repository override for this section |
+| Implementation difficulty rubric | Packaged | No user or repository override for this section |
 | Capability tiers | Repository | Repository overrides user overrides packaged for this section |
 | Escalation policy | Packaged | No user or repository override for this section |
 
@@ -128,7 +128,7 @@ policy for each section. Example output:
 
 ```
 Provider policy resolved:
-  Difficulty rubric     → packaged
+  Implementation difficulty rubric → packaged
   Capability tiers      → repository (.agents/boss-issue-loop/MODEL-SELECTION.md)
   Escalation policy     → packaged
 ```
@@ -136,13 +136,34 @@ Provider policy resolved:
 If a level was skipped due to absence or unreadability, say so explicitly
 (e.g. `User/machine level skipped — file not found`).
 
-Rank each task `low`, `medium`, or `high` with a one-sentence rationale, and
+Rank implementation difficulty and review risk separately, giving each a
+one-sentence rationale. Resolve the reviewer count and all issue budgets from
+the authoritative policy in [`MODEL-SELECTION.md`](MODEL-SELECTION.md), then
 choose the lowest capable tier. Among equivalent providers, if both report
 `status: ok` prefer the larger remaining weekly usage percentage; otherwise use
 the stable declared order. Use the provider usage helpers in
 [`USAGE-HELPERS.md`](USAGE-HELPERS.md) to obtain normalized weekly capacity.
-Keep at most one writer per worktree, two reviewers, and three child agents
-total.
+Enforce the issue-agent concurrency limit from the authoritative policy in
+[`MODEL-SELECTION.md`](MODEL-SELECTION.md).
+
+### Issue budget accounting
+
+Initialize four counters for each issue: `recovery_prompts`, `writer_launches`,
+`review_rounds`, and `reviewer_replacements`. Increment a counter when its
+action starts and enforce these limits:
+
+- Send at most one targeted recovery prompt to a writer. Use it only for the
+  single bounded follow-up to a clearly correctable stall or non-progress by
+  that writer.
+- Launch at most two writers: the initial capable tier and at most one retry at
+  the next capable tier. A higher tier may be the initial tier for a harder
+  issue, but does not add retries.
+- Run at most two review rounds: the initial round and one follow-up round.
+- Replace at most one reviewer per issue. When two reviewers are required,
+  keep them distinct.
+
+Stop the corresponding action when its counter reaches its limit; take any
+fresh review only when `MODEL-SELECTION.md` classifies the change as material.
 
 ## Orchestration
 
@@ -204,9 +225,9 @@ step 8.
 2. Select the first unblocked issue in scope and tracker order. Confirm no active agent or workspace already owns its issue label. Record the accepted base commit (the current HEAD of the coordinator branch).
 3. Through the adapter, create `issue-<number>-<slug>` from the accepted base commit. Pass the exact issue number, base commit, and workspace ID to the implementer.
 4. Render and send the Implementer Handoff Contract below. Fill every placeholder with the exact issue, accepted base, workspace, and repository-specific commands discovered in step 1. The implementer must commit all changes before running the final ticket verification gate.
-5. Accept only a committed, linear, clean worktree whose verification gates pass. A clearly correctable stall gets one targeted recovery instruction; repeated failure, non-progress, scope corruption, or an explicit blocker follows the escalation policy in MODEL-SELECTION.md (archive the agent and its disposable worktree, retry from the accepted base at the next capability tier).
-6. Launch exactly two independent read-only reviewers in parallel. Select review tiers appropriate to the ranked difficulty: `low` tasks draw from the lowest review tier, `medium` from the mid tier, and `high` from the highest available tier — always two distinct reviewers regardless of tier. Give both the fixed-point diff and issue specification, and deliver the Reviewer Contract below. Report which review tiers were selected and the difficulty-ranked rationale. Ask for concrete findings with file/line references and separate hard defects from advisory concerns.
-7. Verify every claimed failure yourself. Resolve actionable findings in the issue worktree, commit the fixes, and rerun the repository and ticket verification gates. Repeat review when a fix materially changes behavior — but archive the completed reviewers first to free a slot under the three-child-agent cap, then launch fresh reviewers. The implementer may be resumed once for bounded review fixes without archiving; if the resumed implementer fails or the fix materially changes behavior, archive it and escalate normally.
+5. Accept only a committed, linear, clean worktree whose verification gates pass. Apply the issue budgets and escalation policy in `MODEL-SELECTION.md`; preserve the clean worktree and commit during capability escalation unless the policy's restart conditions apply.
+6. Classify review risk independently from implementation difficulty, resolve the reviewer count from `MODEL-SELECTION.md`, and launch the required independent read-only reviewers. Select review tiers appropriate to the ranked difficulty, give reviewers the fixed-point diff and issue specification, and deliver the Reviewer Contract below. Report both rationales and ask for concrete findings with file/line references, separating hard defects from advisory concerns.
+7. Verify every claimed failure yourself. For bounded findings, resume the current writer with targeted instructions and run targeted re-review. Use a full fresh review only after a material behavior change. Archive completed reviewers before any new review launch, and apply the review-round and replacement limits from `MODEL-SELECTION.md`.
 8. Integrate only the verified commit into the coordinator branch with a non-interactive fast-forward or merge. Inspect status, diff, and log before integration.
 9. Push the integrated branch to its configured remote. Close the issue with a concise implementation and verification comment only after the push succeeds.
 10. Through the adapter, archive completed issue agents and disposable workspaces, including stale instances carrying the completed issue label. Preserve the commit and useful review evidence before cleanup.
@@ -231,9 +252,9 @@ For every review, deliver this contract with concrete values:
 > `blocked` identifies an exact missing dependency, command failure, or
 > unavailable item of evidence. Advisory concerns alone yield `approve`.
 
-The implementer supplies the review packet evidence. Bounded review fixes may
-resume the same implementer once; failed recovery follows the normal
-fresh-worktree escalation with verified findings in the failure note.
+The implementer supplies the review packet evidence. Apply bounded review fixes
+and targeted re-review under the issue budgets in `MODEL-SELECTION.md`; record
+verified findings in any fresh-attempt failure note.
 
 ## Implementer Handoff Contract
 
