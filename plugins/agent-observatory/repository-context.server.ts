@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { defineAttachmentSource, defineRpc, PluginAttachmentSearchPayloadSchema, type PluginHandlerContext } from "@getpaseo/plugin/server";
-import { diffEvidenceText, gitDiffEvidence, repositoryItem, searchRepository, snapshotText } from "./repository-snapshots";
+import { diffEvidenceText, gitDiffEvidence, repositoryItem, searchRepository, snapshotText } from "./repository-snapshots.server";
 
 export const repositoryContextSearch = defineRpc({
   name: "repository-context.search",

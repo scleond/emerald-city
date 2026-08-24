@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { binaryPathsFromNumstat, diffEvidenceText, gitDiffEvidence, previewAttachment, repositoryItem, searchRepository, SNAPSHOT_LIMIT, SNAPSHOT_LINE_LIMIT, snapshotText } from "./repository-snapshots";
+import { binaryPathsFromNumstat, diffEvidenceText, gitDiffEvidence, previewAttachment, repositoryItem, searchRepository, SNAPSHOT_LIMIT, SNAPSHOT_LINE_LIMIT, snapshotText } from "./repository-snapshots.server";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true }))); });

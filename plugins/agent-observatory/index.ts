@@ -2,7 +2,7 @@ import type { PluginContext, PluginHandlerContext } from "@getpaseo/plugin";
 import { AgentObservatoryPanel } from "./main.client";
 import { observatoryDismissalContracts, type DismissalStore } from "./dismissals";
 import { observatoryUsageContracts } from "./usage-turns";
-import { repositoryContextSearch, repositoryContextSource, searchRepositoryContext } from "./repository-context";
+import { repositoryContextSearch, repositoryContextSource, searchRepositoryContext } from "./repository-context.server";
 
 let storePromise: Promise<DismissalStore> | null = null;
 let usageStorePromise: ReturnType<typeof importUsageStore> | null = null;
