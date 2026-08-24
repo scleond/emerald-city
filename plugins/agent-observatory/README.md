@@ -192,3 +192,11 @@ exclusion, usage bars, attention queue, detail, and wide/compact + light/dark ve
   workspace still exists on the selected host.
 - Dismissal not persisting — check daemon file store permissions and `paseo daemon logs` for
   `dismissal store` errors.
+
+## Repository context
+
+The plugin contributes a **Repository context** attachment source. It lists Git
+repositories for explicit selection when no workspace is active, then searches
+tracked documents and text files by path or title. Results are immutable,
+bounded snapshots with source, generation, and truncation metadata. Secret-like
+paths and generated/dependency directories are excluded.

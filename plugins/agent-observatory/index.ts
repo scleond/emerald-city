@@ -2,6 +2,7 @@ import type { PluginContext, PluginHandlerContext } from "@getpaseo/plugin";
 import { AgentObservatoryPanel } from "./main.client";
 import { observatoryDismissalContracts, type DismissalStore } from "./dismissals";
 import { observatoryUsageContracts } from "./usage-turns";
+import { repositoryContextSearch, repositoryContextSource, searchRepositoryContext } from "./repository-context";
 
 let storePromise: Promise<DismissalStore> | null = null;
 let usageStorePromise: ReturnType<typeof importUsageStore> | null = null;
@@ -13,6 +14,8 @@ function getStore(): Promise<DismissalStore> {
 }
 
 export default function contribute(plugin: PluginContext) {
+  plugin.addAttachmentSource(repositoryContextSource);
+  plugin.handle(repositoryContextSearch, async (input, ctx) => searchRepositoryContext(input, ctx.paseo));
   plugin.addWorkspacePanel({
     id: "project-observatory",
     title: "Agent Observatory",
