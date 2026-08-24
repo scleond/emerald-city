@@ -368,7 +368,7 @@ export class ProjectObservationController {
       this.historicalTurns.set(agentId, turns);
       let record = emptyAgentUsage();
       for (const turn of turns) {
-        record = reduceAgentUsage(record, { kind: turn.confidence === "low" ? "provisional" : "final", turnId: turn.turnId, model: turn.model, canonicalModelId: turn.canonicalModelId, provider: turn.provider, displayName: turn.displayName, usage: { inputTokens: turn.inputTokens ?? undefined, cachedInputTokens: turn.cachedInputTokens ?? undefined, outputTokens: turn.outputTokens ?? undefined, totalCostUsd: turn.costUsd ?? undefined, contextWindowUsedTokens: turn.contextUsedTokens ?? undefined, contextWindowMaxTokens: turn.contextMaxTokens ?? undefined } }, this.agentModels.get(agentId) ?? null);
+        record = reduceAgentUsage(record, { kind: turn.confidence === "low" ? "provisional" : "final", turnId: turn.turnId, model: turn.model, canonicalModelId: turn.canonicalModelId, provider: turn.provider, displayName: turn.displayName, costState: turn.costState, usage: { inputTokens: turn.inputTokens ?? undefined, cachedInputTokens: turn.cachedInputTokens ?? undefined, outputTokens: turn.outputTokens ?? undefined, totalCostUsd: turn.costUsd ?? undefined, contextWindowUsedTokens: turn.contextUsedTokens ?? undefined, contextWindowMaxTokens: turn.contextMaxTokens ?? undefined } }, this.agentModels.get(agentId) ?? null);
       }
       this.usage.set(agentId, record);
     } catch { /* malformed persisted data must not prevent live ingestion */ }

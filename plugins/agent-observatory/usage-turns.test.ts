@@ -55,6 +55,7 @@ describe("usage turn store", () => {
   it("normalizes live and historical usage shapes to one turn event", () => {
     expect(normalizeUsageEvent({ type: "usage_updated", turnId: "t", usage: { inputTokens: 1 }, timestamp: "2026-01-01T00:00:00.000Z" })).toMatchObject({ kind: "provisional", turnId: "t" });
     expect(normalizeUsageEvent({ kind: "turn_completed", turnId: "t", usage: { outputTokens: 2 }, observedAt: "2026-01-01T00:00:01.000Z" })).toMatchObject({ kind: "final", turnId: "t", observedAt: "2026-01-01T00:00:01.000Z" });
+    expect(normalizeUsageEvent({ kind: "turn_completed", turnId: "cost-state", costState: "partial", usage: { totalCostUsd: 1 } })).toMatchObject({ costState: "partial" });
   });
 
   it("rejects null and empty usage at normalization", () => {
