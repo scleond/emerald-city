@@ -20,6 +20,24 @@ describe("repository snapshots", () => {
     expect(previewAttachment("a\n".repeat(SNAPSHOT_LINE_LIMIT + 1)).lineCount).toBe(SNAPSHOT_LINE_LIMIT);
   });
 
+  it("bounds the final snapshot envelope without clipping provenance", () => {
+    const text = snapshotText({ path: "docs/guide.md", title: "Guide", source: "tracked", content: "x".repeat(SNAPSHOT_LIMIT), truncated: false, generatedAt: "2026-01-01T00:00:00.000Z" });
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(SNAPSHOT_LIMIT);
+    expect(text.split("\n").length).toBeLessThanOrEqual(SNAPSHOT_LINE_LIMIT);
+    expect(text).toContain("Source: tracked file docs/guide.md");
+    expect(text).toContain("Generated: 2026-01-01T00:00:00.000Z");
+    expect(text).toContain("Truncated: yes");
+  });
+
+  it("bounds the final diff envelope while preserving basis and exclusions", () => {
+    const text = diffEvidenceText({ path: ".", title: "Working tree diff", source: "git-diff", basis: "HEAD working tree", content: "+界\n".repeat(SNAPSHOT_LINE_LIMIT * 2), truncated: false, generatedAt: "2026-01-01T00:00:00.000Z", excluded: [{ path: "secrets/config.txt", reason: "secret-like filename: secrets/config.txt" }] });
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(SNAPSHOT_LIMIT);
+    expect(text.split("\n").length).toBeLessThanOrEqual(SNAPSHOT_LINE_LIMIT);
+    expect(text).toContain("Basis: HEAD working tree");
+    expect(text).toContain("- secrets/config.txt: secret-like filename: secrets/config.txt");
+    expect(text).toContain("Truncated: yes");
+  });
+
   it("searches tracked documents by path or title and excludes secrets", async () => {
     const directory = await repository();
     await fs.mkdir(path.join(directory, "docs"));

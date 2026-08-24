@@ -31,6 +31,24 @@ function boundedText(value: string, byteLimit: number, lineLimit: number): Attac
   return { text, byteLength: Buffer.byteLength(text, "utf8"), lineCount: text ? text.split("\n").length : 0, truncated };
 }
 
+function renderAttachment(metadata: string[], content: string, inputTruncated: boolean): string {
+  const metadataWithoutFlag = [...metadata, "Truncated: no"].join("\n");
+  const metadataLines = metadataWithoutFlag.split("\n").length;
+  const metadataBytes = Buffer.byteLength(metadataWithoutFlag, "utf8") + 2;
+  if (metadataBytes > SNAPSHOT_LIMIT || metadataLines >= SNAPSHOT_LINE_LIMIT) {
+    throw new Error("attachment metadata exceeds the composer snapshot limits");
+  }
+  const contentPreview = boundedText(content, SNAPSHOT_LIMIT - metadataBytes - 2, SNAPSHOT_LINE_LIMIT - metadataLines - 2);
+  const truncated = inputTruncated || contentPreview.truncated;
+  const renderedMetadata = [...metadata, `Truncated: ${truncated ? "yes" : "no"}`];
+  const rendered = `${renderedMetadata.join("\n")}\n\n${contentPreview.text}`;
+  // The truncation field is metadata and is deliberately rendered after the content budget is known.
+  if (Buffer.byteLength(rendered, "utf8") > SNAPSHOT_LIMIT || rendered.split("\n").length > SNAPSHOT_LINE_LIMIT) {
+    throw new Error("attachment metadata exceeds the composer snapshot limits");
+  }
+  return rendered;
+}
+
 /** Creates the exact, bounded text that will be copied into a composer attachment. */
 export function previewAttachment(text: string, byteLimit = SNAPSHOT_LIMIT, lineLimit = SNAPSHOT_LINE_LIMIT): AttachmentPreview {
   return boundedText(text, byteLimit, lineLimit);
@@ -99,12 +117,12 @@ export async function searchRepository(repositoryPath: string, query: string, ge
 }
 
 export function snapshotText(snapshot: RepositorySnapshot) {
-  return previewAttachment([`# ${snapshot.title}`, `Source: ${snapshot.source} file ${snapshot.path}`, `Generated: ${snapshot.generatedAt}`, `Truncated: ${snapshot.truncated ? "yes" : "no"}`, "", snapshot.content].join("\n")).text;
+  return renderAttachment([`# ${snapshot.title}`, `Source: ${snapshot.source} file ${snapshot.path}`, `Generated: ${snapshot.generatedAt}`], snapshot.content, snapshot.truncated);
 }
 
 export function diffEvidenceText(evidence: RepositoryDiffEvidence) {
   const exclusions = evidence.excluded.length === 0 ? "None" : evidence.excluded.map(({ path: filePath, reason }) => `- ${filePath}: ${reason}`).join("\n");
-  return previewAttachment([`# ${evidence.title}`, `Source: ${evidence.source}`, `Basis: ${evidence.basis}`, `Generated: ${evidence.generatedAt}`, `Truncated: ${evidence.truncated ? "yes" : "no"}`, "Excluded paths:", exclusions, "", evidence.content].join("\n")).text;
+  return renderAttachment([`# ${evidence.title}`, `Source: ${evidence.source}`, `Basis: ${evidence.basis}`, `Generated: ${evidence.generatedAt}`, "Excluded paths:", exclusions], evidence.content, evidence.truncated);
 }
 
 export async function gitDiffEvidence(repositoryPath: string, generatedAt = new Date().toISOString()): Promise<RepositoryDiffEvidence> {
