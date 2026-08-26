@@ -1,0 +1,4 @@
+interface:
+  display_name: "Obsidian Memory"
+  short_description: "Save durable context to your Obsidian vault"
+  default_prompt: "Use $obsidian-memory to save the durable context from this conversation to my vault."
