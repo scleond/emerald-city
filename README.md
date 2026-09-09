@@ -31,6 +31,10 @@ Requirements are skill-specific:
 
 ## Configuration
 
+### Paseo
+
+See [Paseo configuration notes](paseo/README.md) for the tested Windows GitHub authentication prompt, daemon setup, and fresh-agent verification.
+
 ### Obsidian Memory
 
 Pass the vault root explicitly when invoking the skill, or set `OBSIDIAN_VAULT_PATH` in the agent's environment. An explicit path takes precedence, which makes multiple-vault workflows possible without changing the default. If no vault exists yet, create a new vault or open an existing folder as a vault in Obsidian, then supply that folder's path. The skill does not create folders or persist configuration unless requested.
