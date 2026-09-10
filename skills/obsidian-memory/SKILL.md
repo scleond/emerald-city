@@ -41,3 +41,22 @@ Turn the useful, durable parts of the current conversation into concise Markdown
 - Distinguish known facts from inferences and label uncertainty.
 - Keep the note compact while retaining rationale that would prevent repeated work.
 - If the user supplies a focus after invoking the skill, emphasize that focus while retaining essential dependencies.
+
+## Voice
+
+A note should read like the user journalling their own work, not like a database
+row. Compact and journal-like are not in tension: the enemy is transcript, not
+prose.
+
+- Write in the user's voice. No agent attribution, no "the assistant did X", no
+  agent/human distinction in the body. The user reviews every note before it
+  lands, so what lands is theirs.
+- Keep the narrative, not only the conclusions. What was tried and abandoned,
+  what turned out to be wrong, and what was surprising are frequently the most
+  valuable lines in a note, because they are what stops the same ground being
+  covered a second time. Outcomes alone age badly.
+- Prefer a sentence to a bullet when the bullet would strip the reasoning out.
+  Judgement that exists in no commit, ticket, or artifact is precisely what the
+  vault is for; anything already recorded elsewhere should be a link.
+- Record the shape of the work, not a blow-by-blow: what the day or session was
+  actually about, where it got stuck, and what changed as a result.
