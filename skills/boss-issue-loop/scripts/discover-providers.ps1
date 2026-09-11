@@ -81,6 +81,26 @@ function Test-CommandExists {
     $null -ne (Get-Command -Name $Command -ErrorAction SilentlyContinue)
 }
 
+# Normalize JSON model output from older CLIs and plain-text output from current
+# CLIs (one model identifier per line).
+function ConvertTo-ModelEntries {
+    param([AllowNull()][string]$Output)
+    if ([string]::IsNullOrWhiteSpace($Output)) { return @() }
+    try {
+        $parsed = $Output | ConvertFrom-Json -ErrorAction Stop
+        $items = if ($parsed -is [array]) { $parsed } elseif ($null -ne $parsed -and $parsed.PSObject.Properties['models']) { $parsed.models } else { @() }
+        return @($items | Where-Object { $null -ne $_ -and $_.PSObject.Properties['id'] -and $_.id -is [string] } | ForEach-Object {
+            $name = if ($_.PSObject.Properties['name']) { [string]$_.name } else { [string]$_.id }
+            New-ModelEntry -Id ([string]$_.id) -Name $name
+        })
+    } catch {
+        return @($Output -split "`r?`n" | ForEach-Object {
+            $line = $_.Trim()
+            if ($line -match '^[A-Za-z0-9][A-Za-z0-9._:/-]*$') { New-ModelEntry -Id $line }
+        })
+    }
+}
+
 # Probes the Codex CLI for authentication and available models.
 function Get-CodexProvider {
     param(
@@ -93,28 +113,20 @@ function Get-CodexProvider {
     }
 
     try {
-        # Probe authentication via `codex auth status --json`
-        $authOutput = & $Executable auth status --json 2>$null
+        # Current Codex exposes authentication through `codex login status`.
+        $authOutput = & $Executable login status 2>$null
         $authenticated = $false
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($authOutput)) {
-            try {
-                $authData = $authOutput | ConvertFrom-Json -ErrorAction Stop
-                $authenticated = $true
-            } catch {
-                # Non-JSON auth status; check exit code only
-                $authenticated = ($LASTEXITCODE -eq 0)
-            }
+        if ($LASTEXITCODE -eq 0) {
+            $authenticated = ($LASTEXITCODE -eq 0)
         }
 
         # Try to list models via `codex models` if available
         $models = @()
         try {
-            $modelsOutput = & $Executable models --json 2>$null
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($modelsOutput)) {
-                $parsed = $modelsOutput | ConvertFrom-Json -ErrorAction Stop
-                foreach ($m in $parsed) {
-                    $models += New-ModelEntry -Id $m.id -Name $m.name
-                }
+            $helpOutput = (& $Executable --help 2>$null) -join "`n"
+            if ($LASTEXITCODE -eq 0 -and $helpOutput -match '(?m)^\s+models\s') {
+                $modelsOutput = & $Executable models 2>$null
+                if ($LASTEXITCODE -eq 0) { $models = @(ConvertTo-ModelEntries -Output ($modelsOutput -join "`n")) }
             }
         } catch {
             # Model listing not available; continue with empty models
@@ -140,29 +152,18 @@ function Get-OpenCodeProvider {
     }
 
     try {
-        # Probe authentication via `opencode auth status`
-        $authOutput = & $Executable auth status --json 2>$null
+        # Credential counts indicate configuration, not remote credential validity.
+        $authOutput = (& $Executable auth list 2>&1) -join "`n"
         $authenticated = $false
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($authOutput)) {
-            try {
-                $authData = $authOutput | ConvertFrom-Json -ErrorAction Stop
-                $authenticated = $true
-            } catch {
-                # Non-JSON auth status; check exit code only
-                $authenticated = ($LASTEXITCODE -eq 0)
-            }
+            $authenticated = $authOutput -match '[1-9][0-9]*\s+(credential|environment\s+variable)'
         }
 
         # Try to list models via `opencode models` if available
         $models = @()
         try {
-            $modelsOutput = & $Executable models --json 2>$null
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($modelsOutput)) {
-                $parsed = $modelsOutput | ConvertFrom-Json -ErrorAction Stop
-                foreach ($m in $parsed) {
-                    $models += New-ModelEntry -Id $m.id -Name $m.name
-                }
-            }
+            $modelsOutput = & $Executable models 2>$null
+            if ($LASTEXITCODE -eq 0) { $models = @(ConvertTo-ModelEntries -Output ($modelsOutput -join "`n")) }
         } catch {
             # Model listing not available; continue with empty models
         }

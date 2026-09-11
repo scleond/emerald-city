@@ -57,16 +57,20 @@ run_discovery() {
           echo "$codex_models"
           return 0
           ;;
-        auth)
+        --help)
+          echo '  models  List models'
+          ;;
+        login)
+          [[ "${2:-}" == status ]] || return 1
           if [[ "$codex_auth_ok" == "true" ]]; then
-            echo '{"status":"authenticated"}'
+            echo 'Logged in' >&2
             return 0
           else
             return 1
           fi
           ;;
         *)
-          return 0
+          return 1
           ;;
       esac
     }
@@ -81,27 +85,63 @@ run_discovery() {
           return 0
           ;;
         auth)
+          [[ "${2:-}" == list ]] || return 1
           if [[ "$opencode_auth_ok" == "true" ]]; then
-            echo '{"status":"authenticated"}'
+            echo '1 credential' >&2
             return 0
           else
-            return 1
+            echo '0 credentials' >&2
+            return 0
           fi
           ;;
         *)
-          return 0
+          return 1
           ;;
       esac
     }
     export -f mock-opencode
 
     source "$DISCOVERY_SCRIPT"
+    # Fixture commands are synchronous; timeout behavior has its own test.
+    run_with_timeout() { shift; "$@" 2>&1; }
     main
   ) 2>/dev/null
 }
 
 # Extract a JSON field from a string.
 jq_field() { jq -r "$1" <<<"$2"; }
+
+@test "codex: no model command is called unless help advertises it" {
+  source "$DISCOVERY_SCRIPT"
+  codex_without_models() {
+    case "$*" in
+      '--help') echo '  login  Manage login' ;;
+      'login status') return 0 ;;
+      *) echo 'unexpected-model-call'; return 0 ;;
+    esac
+  }
+  export -f codex_without_models
+  result="$(probe_codex codex_without_models 5)"
+  [ "$(jq '.models | length' <<<"$result")" = 0 ]
+  [ "$(jq '.authenticated' <<<"$result")" = true ]
+}
+
+@test "timeout fallback preserves failed command exit status" {
+  source "$DISCOVERY_SCRIPT"
+  command() {
+    if [[ "$*" == '-v timeout' ]]; then return 1; fi
+    builtin command "$@"
+  }
+  run run_with_timeout 5 bash -c 'exit 7'
+  [ "$status" -eq 7 ]
+}
+
+@test "text model parsing rejects warnings and malformed JSON" {
+  source "$DISCOVERY_SCRIPT"
+  result="$(parse_models $'Warning: unavailable\n{not json\nprovider/model-1\n')"
+  [ "$(jq 'length' <<<"$result")" = 1 ]
+  [ "$(jq -r '.[0].id' <<<"$result")" = provider/model-1 ]
+}
 
 # ---------------------------------------------------------------------------
 # Dependency checks
@@ -143,6 +183,14 @@ jq_field() { jq -r "$1" <<<"$2"; }
 
   first_model_id="$(jq_field '.providers[0].models[0].id' "$result")"
   [ "$first_model_id" = "gpt-5.6-luna" ]
+}
+
+@test "success: current CLIs with plain-text model output" {
+  result="$(run_discovery true true $'gpt-5.6-luna\ngpt-5.6-sol' \
+                         true true $'opencode-go/mimo-v2.5')"
+  [ "$(jq '.providers[0].models | length' <<<"$result")" = "2" ]
+  [ "$(jq -r '.providers[0].models[0].id' <<<"$result")" = "gpt-5.6-luna" ]
+  [ "$(jq -r '.providers[1].models[0].id' <<<"$result")" = "opencode-go/mimo-v2.5" ]
 }
 
 @test "success: providers without models" {
@@ -274,7 +322,7 @@ jq_field() { jq -r "$1" <<<"$2"; }
   echo "$result" | jq -e '.status' >/dev/null 2>&1
   echo "$result" | jq -e '.providers' >/dev/null 2>&1
   echo "$result" | jq -e '.adapters' >/dev/null 2>&1
-  echo "$result" | jq -e '.warning' >/dev/null 2>&1
+  echo "$result" | jq -e 'has("warning")' >/dev/null 2>&1
 }
 
 @test "JSON shape: each provider has required fields" {
@@ -284,7 +332,7 @@ jq_field() { jq -r "$1" <<<"$2"; }
     echo "$result" | jq -e ".providers[$i].status" >/dev/null 2>&1
     echo "$result" | jq -e ".providers[$i].authenticated" >/dev/null 2>&1
     echo "$result" | jq -e ".providers[$i].models" >/dev/null 2>&1
-    echo "$result" | jq -e ".providers[$i].warning" >/dev/null 2>&1
+    echo "$result" | jq -e ".providers[$i] | has(\"warning\")" >/dev/null 2>&1
   done
 }
 

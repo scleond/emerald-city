@@ -14,6 +14,15 @@ user-level config.
 The user must have at least one provider CLI installed (codex, opencode). The
 discovery script (`scripts/discover-providers.ps1` or
 `scripts/discover-providers.sh`) must have been run and its output available.
+Run setup on the host environment (or grant it access to the user profile),
+because Codex and OpenCode authentication and logs live outside the repository.
+A sandbox that cannot read OpenCode's user log directory may report a probe
+failure even though the same CLI works on the host.
+Discovery treats OpenCode's nonzero credential or environment-variable count
+as configured authentication; it does not validate credentials remotely.
+Codex model discovery remains empty when its CLI does not advertise a model-list
+command; select its models during setup rather than treating an empty list as
+an authentication failure.
 
 ## Flow
 
