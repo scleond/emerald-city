@@ -1,0 +1,4 @@
+interface:
+  display_name: "Post-Mortem"
+  short_description: "Review session friction and tooling improvements"
+  default_prompt: "Use $post-mortem to summarize this session and recommend the highest-value tooling improvements."
