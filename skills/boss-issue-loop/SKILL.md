@@ -272,8 +272,9 @@ step 8.
 7. Verify every claimed failure yourself. For bounded findings, resume the current writer with targeted instructions and run targeted re-review. Use a full fresh review only after a material behavior change. Archive completed reviewers before any new review launch, and apply the review-round and replacement limits from `MODEL-SELECTION.md`.
 8. Integrate only the verified commit into the coordinator branch with a non-interactive fast-forward or merge. Inspect status, diff, and log before integration, then record the verified integration result.
 9. Push the integrated branch to its configured remote. Record the push result, then close the issue with a concise implementation and verification comment only after the push succeeds; record closure afterward.
-10. Through the adapter, archive completed issue agents and disposable workspaces, including stale instances carrying the completed issue label. Preserve the commit and useful review evidence before cleanup, then record cleanup.
-11. Re-read the open issue frontier and start the next iteration from the new accepted base commit.
+10. After a successful integration and push, verify that each issue-branch tip to be deleted is an ancestor of the pushed coordinator-branch commit. Preserve the integrated commit SHA and review evidence before cleanup. Delete only issue-owned local and remote branches whose merge is verified; protect the coordinator branch and the repository's actual default branch. If a branch is checked out in a disposable workspace, defer its local deletion until that workspace is archived in step 11. Record merge verification and branch-deletion results.
+11. Through the adapter, archive completed issue agents and disposable workspaces, including stale instances carrying the completed issue label. Preserve the commit and useful review evidence before cleanup, then record cleanup.
+12. Re-read the open issue frontier and start the next iteration from the new accepted base commit.
 
 ## Stop Conditions
 

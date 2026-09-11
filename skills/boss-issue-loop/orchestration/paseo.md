@@ -28,9 +28,10 @@ agent launch; a bounded recovery prompt to an existing writer remains allowed.
 Degraded mode may inspect and verify safely, but an unmet independent-review
 gate remains unmet and cannot be recorded as approved.
 
-Push, completion comment, issue closure, and completed-resource cleanup are
-coordinator loop operations attempted directly by the coordinator; only the
-host approval surface prompts the user. Record an `*-attempted` state before
+Push, completion comment, issue closure, merge verification, issue-branch
+deletion, and completed-resource cleanup are coordinator loop operations
+attempted directly by the coordinator; only the host approval surface prompts
+the user. Record an `*-attempted` state before
 invoking the remote mutation and an `*-observed` state only after verification;
 reconcile observations before retrying after restart. Record active and
 archived agent/workspace resources around coordinator mutations; cleanup
